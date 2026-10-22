@@ -192,7 +192,6 @@ window.FriendAvatar = (function () {
   // Ось X кадра ориентирована на ДВИЖЕНИЕ (вперёд = направо), поэтому для
   // ходьбы налево кадр просто зеркалится — разворот не требует второго листа.
   // Ведомая нога рисуется полупрозрачной (setA): как в тени собственного тела.
-  const WALK_LEG_Y = 48;
   function legGrids() {
     // Ноги в покое рисуются на своих местах: левая x17 (тень), правая x21.
     // Для кадра x каждой ноги = место покоя + смещение.
@@ -215,8 +214,11 @@ window.FriendAvatar = (function () {
       return g;
     }
     const A = mk(3, -2);   // правая вперёд, левая назад
-    const B = mk(-2, 3);   // левая вперёд, правая назад
-    return [A, flipX(B)];  // A и зеркало A: полный цикл шага
+    // Полный цикл шага = А и ЕГО зеркало (ноги врозь вправо / ноги врозь
+    // влево). Раньше вторым кадром шёл mk(-2, 3): в нём обе ноги стояли в
+    // центре под юбкой и сливались — на ходу ноги «пропадали» каждый второй
+    // кадр.
+    return [A, flipX(A)];
   }
 
   // setA — пиксель с альфой: «ведомая» нога пишется полупрозрачной, как в
@@ -245,14 +247,19 @@ window.FriendAvatar = (function () {
       rect(g, 11, 53, 6, 3, C.shoe);        // левая туфля
       rect(g, 24, 53, 6, 3, C.shoe);        // правая туфля
     } else if (legFrame >= 0) {
-      // Шагающие ноги: кадр из листа шага (legGrids), нижняя зона тела.
+      // Шагающие ноги: кадр из листа шага (legGrids). Кадр — сетка целиком в
+      // АБСОЛЮТНЫХ координатах (ноги стоят на своих строках 49..55), поэтому
+      // копируется без смещений. Раньше копирование шло со сдвигом
+      // (6 + x, WALK_LEG_Y + y): строки 49+48=97 уезжали за край сетки, и
+      // при ходьбе ноги не дорисовывались вообще («ноги пропадают, когда она
+      // бегает по экрану»).
       const lg = legGrids()[legFrame % 2];
       for (let y = 0; y < lg.h; y++) {
         for (let x = 0; x < lg.w; x++) {
           const v = lg.px[y * lg.w + x];
           if (v === null) continue;
-          if (typeof v === 'object') setA(g, 6 + x, WALK_LEG_Y + y, v.c, v.a);
-          else set(g, 6 + x, WALK_LEG_Y + y, v);
+          if (typeof v === 'object') setA(g, x, y, v.c, v.a);
+          else set(g, x, y, v);
         }
       }
     } else {
@@ -1277,6 +1284,32 @@ window.FriendAvatar = (function () {
       setMoodBand: setMoodBand,
       calmFace: calmFace,
       setWalk: setWalk,
+      // walkLegTest — пиксельная проверка цикла шага (нужна самопроверке):
+      // для каждого кадра возвращает колонки ног в зоне бёдер/голеней
+      // (строки 50..53 — ниже юбки, выше туфель). У исправного шага в обоих
+      // кадрах ровно ДВЕ группы колонок с зазором между ними.
+      walkLegTest: function () {
+        const out = [];
+        for (let f = 0; f < 2; f++) {
+          const g = bodyGrid('stand', f);
+          const cols = [];
+          for (let x = 8; x < 32; x++) {
+            let has = false;
+            for (let y = 50; y <= 53; y++) {
+              if (g.px[y * GW + x] !== null) { has = true; break; }
+            }
+            if (has) cols.push(x);
+          }
+          const groups = [];
+          for (const x of cols) {
+            if (groups.length && x <= groups[groups.length - 1][1] + 1) {
+              groups[groups.length - 1][1] = x;
+            } else groups.push([x, x]);
+          }
+          out.push(groups);
+        }
+        return out;
+      },
       walking: function () { return anim.walking; },
       say: say,
       wave: wave,

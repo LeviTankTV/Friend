@@ -2374,6 +2374,59 @@ async function runSelfTest() {
         : 'ОШИБКА (' + JSON.stringify(idlePart) + ')'));
   }
 
+  // Двадцать четвёртая часть: «ходьба по экрану» — длинный проход. Стартует
+  // маршрут (к дальнему краю, разворот, полный переход к другому), страница
+  // сама следит за направлениями и положением. scale=8 — ускорение только
+  // для проверки: настоящий маршрут шёл бы минуту.
+  let routePart = null;
+  {
+    const waR = screen.getPrimaryDisplay().workArea;
+    routePart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      if (!fa.walkRoute) return { ok: false, why: 'маршрута нет' };
+      // Пиксельная проверка цикла шага: в ОБОИХ кадрах ноги — две группы
+      // колонок с зазором (не слились в центр), кадры зеркальны друг другу.
+      const legs = fa.avatar.walkLegTest();
+      const legOk = legs.length === 2 && legs.every((g) =>
+        g.length === 2 && g[1][0] - g[0][1] >= 5);
+      // Зеркальность кадров: flipX — это x' = GW-1-x (GW=40). Первый кадр —
+      // передняя нога справа, второй — её зеркало.
+      const legMirrored = legs.length === 2 && legs[0].length === 2 &&
+        legs[1].length === 2 &&
+        legs[1][0][0] + legs[0][1][1] === 39 &&
+        legs[1][0][1] + legs[0][1][0] === 39;
+      fa.stopWalk('перед маршрутом');
+      fa.walkRoute(8);
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      let minx = 1e9, maxx = -1e9, sawTurn = false, lastDir = 0, ended = false;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 26000 && !ended) {
+        const p = await fa.bridge.getPosition();
+        if (p && typeof p.x === 'number') { minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x); }
+        const d = fa.avatar.walking();
+        if (d !== 0 && lastDir !== 0 && d !== lastDir) sawTurn = true;
+        if (d !== 0) lastDir = d;
+        if (d === 0 && Date.now() - t0 > 1500) ended = true;
+        if (!ended) await t(250);
+      }
+      const walking = fa.avatar.walking();
+      fa.stopWalk('самопроверка кончила маршрут');
+      const pf = await fa.bridge.getPosition();
+      const wa = await fa.bridge.workArea();
+      const full = wa.width - 248;
+      const range = maxx - minx;
+      return {
+        ok: ended && sawTurn && range >= full * 0.5 && legOk && legMirrored &&
+          pf.x >= wa.x - 2 && pf.x + 248 <= wa.x + wa.width + 2,
+        why: 'размах ' + range + ' из ' + full + ', разворот ' + sawTurn +
+          ', ноги ' + JSON.stringify(legs) + ' зеркало ' + legMirrored +
+          ', конец ' + ended + ', финал ' + pf.x,
+      };
+    })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
+    console.log('[friend] selftest: ходьба по экрану — ' +
+      (routePart.ok ? 'OK (' + routePart.why + ')' : 'ОШИБКА (' + routePart.why + ')'));
+  }
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
@@ -2397,7 +2450,7 @@ async function runSelfTest() {
 
   console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------

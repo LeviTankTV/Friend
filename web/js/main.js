@@ -967,6 +967,30 @@
     net.sendPosition(winPos.x, winPos.y);   // запомнить, где она встала
   }
 
+  // Длинный проход по экрану (ходьба по экрану из Desktop Mate): не «шаг туда-
+  // сюда на десять секунд», а переход через весь рабочий стол: до ближайшего
+  // КРАЙНЕГО края, разворот там, полный переход к другому краю и остановка.
+  // scale — только для самопроверки: умножает скорость, чтобы километровый
+  // маршрут проходил за секунды, а не за минуту.
+  function startRouteWalk(scale) {
+    const k = Math.max(1, Math.min(8, scale || 1));
+    return Promise.resolve(bridge.workArea()).then((area) => {
+      const wa = area || { x: 0, width: window.screen.availWidth };
+      const size = windowSize();
+      const center = winPos.x + size.w / 2;
+      const mid = wa.x + wa.width / 2;
+      // Идём к ДАЛЬНЕМУ краю: маршрут длиннее и видно весь экран.
+      const d = center < mid ? 1 : -1;
+      const farEdge = d > 0 ? wa.x + wa.width - size.w : wa.x;
+      const leg1 = Math.abs(farEdge - winPos.x);
+      const leg2 = Math.max(0, wa.width - size.w);
+      const speed = 2.4 * k;                 // пикселей за тик (80 мс)
+      const durMs = ((leg1 + leg2) / speed) * 80 + 3000;
+      startWalk(d, Date.now() + durMs);
+      walk.speed = speed;
+    });
+  }
+
   // goHome — вернуть её в привычный угол: единственное действие, которое всегда
   // вытаскивает персонажа из любой ситуации «я его не вижу».
   function goHome() {
@@ -1092,6 +1116,12 @@
     const quiet = now - lastSeen;
     if (quiet < 5 * 60 * 1000 || quiet > 60 * 60 * 1000) return;
     if (Math.random() > 0.3) return;
+    // Рядом и молчит уже 5–10 минут (дальше — засыпание idlewatch'а):
+    // четверть случаев — длинный проход через весь экран, не «туда-сюда».
+    if (quiet < 10 * 60 * 1000 && Math.random() < 0.25) {
+      startRouteWalk(1);
+      return;
+    }
     startWalk(Math.random() < 0.5 ? -1 : 1, Date.now() + 8000 + Math.random() * 8000);
   }
 
@@ -1266,6 +1296,10 @@
     // idle — «сон/уход после простоя» (js/idlewatch.js): самопроверка
     // задаёт простой числом (feed) и следит за фазой awake/asleep/gone.
     idle: idle,
+    // walkRoute(scale) — «ходьба по экрану»: длинный проход до дальнего
+    // края и полный переход к другому. scale — ускорение для самопроверки.
+    walkRoute: startRouteWalk,
+    stopWalk: stopWalk,
     // applyPeek — пересчитать смещение «выхода» прямо сейчас, не дожидаясь
     // следующего кадра. Нужно проверке оболочки: она меряет обе крайние позы, и
     // ждать кадр между переключением и замером — это гонка с анимацией.
