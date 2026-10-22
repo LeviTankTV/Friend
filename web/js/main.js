@@ -326,7 +326,9 @@
 
   // Курсор рядом с кромкой — она выглядывает. У края экрана иначе её не достать,
   // а ждать случайной паузы человек не станет: подвёл мышь — она показалась.
-  window.addEventListener('pointermove', () => peek.poke());
+  // (Заодно движение мыши по её окну — событие «человек рядом» для idlewatch:
+  // система считает любой ввод, но её окно её же курсор и подтверждает.)
+  window.addEventListener('pointermove', () => { peek.poke(); idleTouch(); });
 
   window.addEventListener('pointermove', (ev) => {
     if (followPower <= 0) return;
@@ -371,6 +373,7 @@
       const w = s.bpm ? (Math.PI * s.bpm) / 30 : 6.3;
       avatar.setDance(s.dancing, w);
       if (s.dancing) {
+        idle.touch();   // музыка играет — человек точно рядом, не спать
         // Танцует — радуется; спящую будит (setEmotion сам снимает сон).
         if (avatar.emotion() !== 'happy') avatar.setEmotion('happy');
       } else if (avatar.emotion() === 'happy') {
@@ -389,6 +392,54 @@
   // важнее живых — самопроверка не зависит от того, что реально играет.
   bridge.onSound((lv) => music.pushLevel(lv));
 
+  // --- «Сон/уход после простоя» (js/idlewatch.js) --------------------------
+  // 10 минут без человека — засыпает («Zzz»); 30 минут — «уходит» к ближайшему
+  // краю экрана и спит там, выглядывая; вернулся — оживает и возвращается на
+  // прежнюю посадку. Простой считает сама страница: idle из кадров focuswatch
+  // плюс местные события (мышь по ней, клик, чат, меню, её голос, танец).
+  let idlePrevSeat = null;
+  let idlePrevPos = null;
+  const idle = window.FriendIdle.attach({
+    busy: () => menu.isOpen() || chat.isOpen() || (drag && drag.isDragging()) ||
+      avatar.walking() !== 0 || avatar.dancing() || ttsPlaying > 0,
+    onSleep: () => { avatar.setEmotion('sleep'); },
+    onWake: () => { if (avatar.emotion() === 'sleep') avatar.setEmotion(avatar.calmFace()); },
+    // Уход: на прежнюю посадку не претендуем — везём к ближайшему краю
+    // (тот же край-механизм с выглядыванием, что в меню). Прежние посадку и
+    // место запоминаем, чтобы вернуться ровно туда, где стояли.
+    onLeave: () => {
+      idlePrevSeat = menu.settings().seat;
+      Promise.all([bridge.getPosition(), bridge.workArea()]).then((p) => {
+        const pos = p[0]; const wa = p[1] || { x: 0, width: window.screen.availWidth };
+        if (pos && typeof pos.x === 'number') idlePrevPos = { x: pos.x, y: pos.y };
+        const mid = wa.x + wa.width / 2;
+        const center = pos && typeof pos.x === 'number' ? pos.x + windowSize().w / 2 : mid;
+        applySeat(center < mid ? 'edge-left' : 'edge-right');
+      });
+    },
+    onReturn: () => {
+      const s = idlePrevSeat || 'free';
+      const pos = idlePrevPos;
+      idlePrevSeat = null;
+      idlePrevPos = null;
+      Promise.resolve(applySeat(s)).then(() => {
+        // applySeat('free') стоит там, где anchor: уход сдвинул anchor к краю,
+        // поэтому «на прежнее место» везём окном явно.
+        if (pos) {
+          const size = windowSize();
+          return bridge.setBounds({ x: pos.x, y: pos.y, width: size.w, height: size.h })
+            .then((real) => { if (real && typeof real.x === 'number') anchorFromWindow(real); });
+        }
+      });
+      if (menu.settings().seat !== s) menu.setSeatQuiet(s);
+    },
+  });
+  // Её реплики иwake-ответы не будят её саму на пустом месте: голос из
+  // колонок — событие «рядом что-то было» только в узком смысле; сон от
+  // серверной команды «иди спать» (emotion sleep) не отменяем: его будит
+  // только возвращение человека.
+  function idleTouch() { idle.touch(); }
+
   drag = window.FriendDrag.attach(el.stage, bridge, {
     // Ловим мышь только на персонаже: считаем попадание в того же персонажа, что
     // назначен hitArea аватара (см. avatar.js).
@@ -397,11 +448,12 @@
     // разговор, а она машет рукой.
     onClick: () => {
       if (menu.isOpen()) return;      // меню открыто — клик по ней его закрывает
+      idleTouch();                    // кликнул по ней — человек рядом
       pokeSpeak();
       avatar.wave();
       chat.toggle();
     },
-    onStart: () => stopWalk('её взяли мышью'),
+    onStart: () => { stopWalk('её взяли мышью'); idleTouch(); },
     onEnd: (pos, movedPx) => {
       if (movedPx < 4) return;        // это был клик, а не перетаскивание
       stopWalk('её перетащили');
@@ -596,7 +648,7 @@
     const t = (text || '').trim();
     if (!t) return;
     const a = new Audio('/tts?text=' + encodeURIComponent(t));
-    a.addEventListener('playing', () => { ttsPlaying++; });
+    a.addEventListener('playing', () => { ttsPlaying++; idleTouch(); });
     const off = (ev) => { if (ev.type === 'ended' || ev.type === 'error') ttsPlaying = Math.max(0, ttsPlaying - 1); };
     a.addEventListener('ended', off);
     a.addEventListener('error', off);
@@ -983,6 +1035,7 @@
   window.addEventListener('contextmenu', (ev) => {
     if (!isOverAvatar(ev.clientX, ev.clientY)) return;
     ev.preventDefault();
+    idleTouch();
     menu.toggle();
   });
 
@@ -1005,6 +1058,7 @@
   bridge.onFocus((d) => {
     if (!d || !d.process) return;
     lastFocus = d;
+    idle.setOsIdle((d.idle || 0) * 1000);    // простой для «сон/уход»
     if (d.idle < 2) lastSeen = Date.now();   // он шевелил мышь меньше двух минут назад
     // Границы активного окна (посадка «на окне»). Границы живут ТОЛЬКО здесь:
     // на сервер и в модель они не отправляются — там по-прежнему только
@@ -1209,6 +1263,9 @@
     // music — «реакция на звук» (js/music.js): самопроверка гоняет
     // детектор тестовыми уровнями (feed-режим) и смотрит на танец.
     music: music,
+    // idle — «сон/уход после простоя» (js/idlewatch.js): самопроверка
+    // задаёт простой числом (feed) и следит за фазой awake/asleep/gone.
+    idle: idle,
     // applyPeek — пересчитать смещение «выхода» прямо сейчас, не дожидаясь
     // следующего кадра. Нужно проверке оболочки: она меряет обе крайние позы, и
     // ждать кадр между переключением и замером — это гонка с анимацией.

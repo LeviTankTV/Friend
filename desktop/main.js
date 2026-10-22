@@ -1093,10 +1093,19 @@ async function runSelfTest() {
   let sizeAfter = win.getBounds();
   const settleFrom = Date.now();
   let lastPos = { x: sizeAfter.x, y: sizeAfter.y };
+  let still = 0;
+  // Неподвижность — ТРИ одинаковых снимка подряд (450 мс), а не один:
+  // на загрузке системы очередь IPC растягивается, и один «стоящий» снимок
+  // бывает между пачками переездов — выход по нему мерил середину пути.
   while (Date.now() - settleFrom < 9000) {
     await new Promise((r) => setTimeout(r, 150));
     const b = win.getBounds();
-    if (b.x === lastPos.x && b.y === lastPos.y) break;
+    if (b.x === lastPos.x && b.y === lastPos.y) {
+      still++;
+      if (still >= 3) break;
+    } else {
+      still = 0;
+    }
     lastPos = { x: b.x, y: b.y };
   }
   sizeAfter = win.getBounds();
@@ -2297,13 +2306,83 @@ async function runSelfTest() {
   console.log('[friend] selftest: танец под музыку — ' +
     (musicPart.ok ? 'OK (' + musicPart.why + ')' : 'ОШИБКА (' + musicPart.why + ')'));
 
+  // Двадцать третья часть: «сон/уход после простоя» (js/idlewatch.js). Простой
+  // задаём числами (feed) без ожидания получаса: 12 минут тишины — сон,
+  // «вернулся» — сон снят; 35 минут — уход к краю (окно у кромки экрана);
+  // «вернулся» — бодрствует и окно на прежнем месте.
+  let idlePart = null;
+  {
+    const waS = screen.getPrimaryDisplay().workArea;
+    const b0 = win.getBounds();
+    idlePart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      const idle = fa.idle;
+      if (!idle) return { ok: false, why: 'модуля idlewatch нет' };
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wait = async (fn, limit) => {
+        const t0 = Date.now();
+        while (Date.now() - t0 < limit) { if (fn()) return true; await t(200); }
+        return false;
+      };
+      idle.feed(12 * 60 * 1000);
+      const slept = await wait(() => fa.avatar.emotion() === 'sleep' &&
+        idle.state().phase === 'asleep', 12000);
+      idle.feed(1000);
+      const woke = await wait(() => idle.state().phase === 'awake' &&
+        fa.avatar.emotion() !== 'sleep', 12000);
+      idle.feed(35 * 60 * 1000);
+      const gone = await wait(() => idle.state().phase === 'gone' &&
+        fa.avatar.emotion() === 'sleep', 12000);
+      // Кромку фиксируем, пока она ещё у края: следом окно поедет обратно.
+      // Ждём, пока позиция перестанет меняться (переезд к краю — цепочка
+      // IPC, на загрузке она растягивается).
+      let edgeAt = null;
+      let prevX = -1;
+      let stable = 0;
+      for (let i = 0; i < 40; i++) {
+        const x = await fa.bridge.getPosition().then((p) => p && p.x);
+        if (x === prevX) { stable++; if (stable >= 3) { edgeAt = x; break; } }
+        else stable = 0;
+        prevX = x;
+        await t(120);
+      }
+      if (edgeAt === null) edgeAt = prevX;
+      idle.feed(1000);
+      const back = await wait(() => idle.state().phase === 'awake' &&
+        fa.avatar.emotion() !== 'sleep', 12000);
+      idle.feed(null);
+      return { slept: slept, woke: woke, gone: gone, back: back, edgeAt: edgeAt };
+    })()`).catch((err) => ({
+      ok: false, why: 'окно страницы: ' + err.message,
+      slept: false, woke: false, gone: false, back: false,
+    }));
+    // Даём окну доехать до края (edgeAt зафиксирован в момент «ушла»).
+    await new Promise((r) => setTimeout(r, 400));
+    // Окно у края и обратно меряем со стороны настоящей геометрии.
+    const bMid = win.getBounds();
+    idlePart.atEdge = typeof idlePart.edgeAt === 'number' &&
+      (Math.abs(idlePart.edgeAt - waS.x) <= 3 ||
+        Math.abs(idlePart.edgeAt + bMid.width - (waS.x + waS.width)) <= 3);
+    const bEnd = win.getBounds();
+    idlePart.movedBack = Math.abs(bEnd.x - b0.x) <= 4;
+    idlePart.ok = idlePart.slept && idlePart.woke && idlePart.gone &&
+      idlePart.atEdge && idlePart.back && idlePart.movedBack;
+    console.log('[friend] selftest: сон/уход после простоя — ' +
+      (idlePart.ok ? 'OK (сон ' + idlePart.slept + ', пробуждение ' + idlePart.woke +
+        ', уход ' + idlePart.gone + ' у края ' + idlePart.atEdge +
+        ', возврат ' + idlePart.back + ' на место ' + idlePart.movedBack + ')'
+        : 'ОШИБКА (' + JSON.stringify(idlePart) + ')'));
+  }
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
+  console.log('[friend] selftest: маяк — возврат настроек');
   writeSettings(keepSettings);
   await win.webContents.executeJavaScript(
     'try { localStorage.setItem("friend.settings.v1", ' + JSON.stringify(JSON.stringify(keepSettings)) + '); } catch (_e) {}',
   ).catch(() => {});
+  console.log('[friend] selftest: маяк — localStorage вернулся');
 
   // Синтетические проверки кончились — возвращаем окну живую мышь.
   quietMouse(false);
@@ -2311,11 +2390,14 @@ async function runSelfTest() {
   // Заканчиваем в домашнем углу: после проверок окно должно остаться там, где
   // человек его ожидает, а сервер — знать это место.
   const home = moveWindow(screen.getPrimaryDisplay().workArea.width - 360, screen.getPrimaryDisplay().workArea.height - 500);
+  console.log('[friend] selftest: маяк — окно дома ' + JSON.stringify(home));
   await win.webContents.executeJavaScript(`window.friendApp.net.sendPosition(${home.x}, ${home.y})`).catch(() => {});
+  console.log('[friend] selftest: маяк — позиция отправлена');
   await new Promise((r) => setTimeout(r, 300));
 
+  console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------
