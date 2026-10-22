@@ -1863,16 +1863,22 @@ async function runSelfTest() {
         a.addEventListener('error', () => done(-1));
         setTimeout(() => done(a.duration || -1), 5000);
       });
-      return { ok: dur >= 1, dur: dur, bytes: blob.size, voice: info.voice };
+      // Интонация по настроению (этап 9б): тот же текст с радостным тоном
+      // обязан отдаваться отдельно (rate/pitch уходят в edge-tts).
+      const resInt = await fetch('/tts?text=' + encodeURIComponent(text) +
+        '&rate=12&pitch=8');
+      const intOk = resInt.ok && (await resInt.blob()).size > 200;
+      return { ok: dur >= 1, dur: dur, bytes: blob.size, voice: info.voice, intOk: intOk };
     })()`);
     // Путь кэша озвучки — локальный (папка данных рядом с памятью).
     const fs = require('fs');
     const path = require('path');
     const ttsDir = path.join(process.env.APPDATA, 'Friend', 'tts');
     const cached = fs.existsSync(ttsDir);
-    voice.ok = !!(tts && tts.ok) && cached;
+    voice.ok = !!(tts && tts.ok) && cached && !!(tts && tts.intOk);
     voice.why = 'голос ' + (tts && tts.voice) + ', mp3 ' + (tts && tts.bytes) + ' байт, ' +
-      'длительность ' + (tts && Math.round(tts.dur * 10) / 10) + ' с, кэш ' + cached;
+      'длительность ' + (tts && Math.round(tts.dur * 10) / 10) + ' с, кэш ' + cached +
+      ', интонация ' + !!(tts && tts.intOk);
   } catch (err) {
     console.error('[friend] selftest: озвучка не проверилась:', err.message);
     voice = { ok: false, why: err.message };

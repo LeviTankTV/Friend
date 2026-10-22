@@ -9,11 +9,17 @@ import (
 	"testing"
 )
 
-// fakeTTS — озвучка-подделка: пишет «mp3» в файл и отдаёт путь.
-type fakeTTS struct{ file string }
+// fakeTTS — озвучка-подделка: пишет «mp3» в файл и отдаёт путь;
+// запоминает интонацию последнего запроса (этап 9б).
+type fakeTTS struct {
+	file      string
+	lastRate  int
+	lastPitch int
+}
 
 func (f *fakeTTS) Available() bool { return true }
-func (f *fakeTTS) Synth(_ context.Context, _ string) (string, error) {
+func (f *fakeTTS) Synth(_ context.Context, _ string, rateDelta, pitchDelta int) (string, error) {
+	f.lastRate, f.lastPitch = rateDelta, pitchDelta
 	return f.file, nil
 }
 
@@ -24,20 +30,26 @@ func TestTTSRouteServesAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, hub := newTestServerWith(t, nil)
-	srv, err := New(Options{Hub: hub, Log: testLog(), TTS: &fakeTTS{file: mp3}})
+	fake := &fakeTTS{file: mp3}
+	srv, err := New(Options{Hub: hub, Log: testLog(), TTS: fake})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/tts?text=привет")
+	resp, err := http.Get(ts.URL + "/tts?text=привет&rate=-12&pitch=-6")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("озвучка должна отдаваться, получен статус %d", resp.StatusCode)
+	}
+	// Интонация (этап 9б): страница сообщает сдвиги темпа и тона — сервер
+	// обязан передать их в озвучку.
+	if fake.lastRate != -12 || fake.lastPitch != -6 {
+		t.Fatalf("интонация не дошла до озвучки: %+d/+%d", fake.lastRate, fake.lastPitch)
 	}
 
 	// Пустой текст — отказ, а не пустой mp3.

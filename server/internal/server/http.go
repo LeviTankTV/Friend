@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,9 +40,11 @@ type Options struct {
 }
 
 // TTSService — озвучивающая сторона (реализация — internal/tts.Service).
+// rateDelta и pitchDelta — интонация настроения (этап 9б, проценты и герцы,
+// 0 = базовый голос).
 type TTSService interface {
 	Available() bool
-	Synth(ctx context.Context, text string) (string, error)
+	Synth(ctx context.Context, text string, rateDelta, pitchDelta int) (string, error)
 }
 
 // STTService — распознающая сторона (реализация — internal/stt.Service).
@@ -106,10 +109,27 @@ func New(opts Options) (*http.Server, error) {
 				http.Error(w, "нужен текст (?text=...)", http.StatusBadRequest)
 				return
 			}
+			// Интонация (этап 9б): страница сообщает настроение числом —
+			// сдвиги темпа (проценты) и тона (герцы). Свои — ограничены ±50,
+			// всё, что не число, = 0 (базовый голос).
+			rateDelta, _ := strconv.Atoi(r.URL.Query().Get("rate"))
+			pitchDelta, _ := strconv.Atoi(r.URL.Query().Get("pitch"))
+			if rateDelta < -50 {
+				rateDelta = -50
+			}
+			if rateDelta > 50 {
+				rateDelta = 50
+			}
+			if pitchDelta < -50 {
+				pitchDelta = -50
+			}
+			if pitchDelta > 50 {
+				pitchDelta = 50
+			}
 			// Таймаут не берём из контекста запроса: страница обрывает
 			// соединение, когда дослушано, а генерация должна дожить до
 			// конца. Отдельный контекст с запасом на саму генерацию.
-			path, err := opts.TTS.Synth(context.Background(), text)
+			path, err := opts.TTS.Synth(context.Background(), text, rateDelta, pitchDelta)
 			if err != nil {
 				http.Error(w, "озвучка не получилась: "+err.Error(), http.StatusServiceUnavailable)
 				return

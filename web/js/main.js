@@ -642,12 +642,24 @@
   // динамиков микрофоном (это же эхо даёт и echoCancellation, но счётчик
   // надёжнее).
   let ttsPlaying = 0;
+  // Интонация (этап 9б): её настроение и сон переводятся в сдвиги темпа
+  // (проценты) и тона (герцы), сервер прогоняет их через edge-tts.
+  // Сон важнее полоски: сонная — заметно медленнее и низко, даже когда
+  // настроение высокое.
+  function speakIntonation() {
+    if (avatar.emotion() === 'sleep') return { rate: -25, pitch: -10 };
+    if (moodBand === 'low') return { rate: -12, pitch: -6 };
+    if (moodBand === 'high') return { rate: 12, pitch: 8 };
+    return { rate: 0, pitch: 0 };
+  }
   function speak(text) {
     if (!voiceInfo || !voiceInfo.available) return;
     if (menu.settings().voice === false) return;
     const t = (text || '').trim();
     if (!t) return;
-    const a = new Audio('/tts?text=' + encodeURIComponent(t));
+    const int = speakIntonation();
+    const a = new Audio('/tts?text=' + encodeURIComponent(t) +
+      '&rate=' + int.rate + '&pitch=' + int.pitch);
     a.addEventListener('playing', () => { ttsPlaying++; idleTouch(); });
     const off = (ev) => { if (ev.type === 'ended' || ev.type === 'error') ttsPlaying = Math.max(0, ttsPlaying - 1); };
     a.addEventListener('ended', off);
@@ -1133,8 +1145,11 @@
   function applyMood(m) {
     if (!m || typeof m.mood !== 'number') return;
     const band = m.band || (m.mood < 0.35 ? 'low' : m.mood > 0.65 ? 'high' : 'mid');
+    moodBand = band;
     avatar.setMoodBand(band);
   }
+  // Полоска настроения на странице — для интонации озвучки (этап 9б).
+  let moodBand = 'mid';
   // Кадр state с настроением: сервер присылает его, когда настроение заметно
   // сдвинулось (сообщение человека подняло, игнор опустил, ночь размое).
   // Единственный обработчик 'state' на странице — этот; позиция приходит
