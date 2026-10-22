@@ -290,7 +290,7 @@
   «внешний лист кадров — OK (на листе true … без арта снова нарисована true)».
 - Проверка: визуальная таблица состояний по клику/реплике.
 
-**Этап 7. Голос (опционально)**
+**Этап 7. Голос (опционально)** (сделан 2026-10-22)
 - ✅ TTS (сделано 2026-10-22, выбор человека: Edge TTS). Её реплики озвучиваются
   голосом `ru-RU-SvetlanaNeural` через бесплатный Microsoft-сервис (CLI пакета
   `edge-tts`, Python стоит на машине). Ключа не нужно. Сервер гоняет генерацию
@@ -369,6 +369,10 @@
   — шаг ускорен восьмикратно, окно проходит через весь экран с разворотом у
   края, кадры ног проверены пикселями (обе ноги в каждом кадре, второй кадр —
   зеркало первого).
+
+**Этап 8. Кроссплатформенность (план, 2026-10-23)** — см. отдельный раздел
+в конце файла: Windows + Linux (X11) + macOS, честные границы фич по ОСям,
+упаковка (electron-builder) и CI-матрица.
 
 ## Трей и автозапуск: сделано (2026-10-22)
 
@@ -670,6 +674,110 @@
 - Пиксельная проверка кадров (`walkLegTest` — группы columns ног в строках
   50..53) поймала обе поломки до прогона: у битвых кадров групп не было вообще,
   у зеркального цикла группы второго кадра = 39 − группы первого.
+
+## Этап 8. Кроссплатформенность (план, 2026-10-23)
+
+Цель: Мира работает на Windows, Linux и macOS — там, где это физически
+возможно, с честными ограничениями вместо обещаний. Приватность неизменна
+на всех ОСях: focus — только имя процесса и заголовок окна; звук — только
+RMS-число; TTS — только текст её реплики; STT/wake — полностью локально.
+
+### Что уже кроссплатформенное (инвентарь по коду)
+
+- Страница (`web/`): чистый JS + PixiJS — работает где угодно.
+- Go-сервер: чистый Go без cgo — `modernc.org/sqlite` (SQLite без C),
+  `gorilla/websocket`, stdlib. `go build` для linux/darwin не требует тулчейна.
+- Пути: `os.UserConfigDir()` (`%AppData%\Friend` / `~/.config/Friend`),
+  TTS-кэш, STT-модель и папка спрайтов уже идут от него.
+- Помощники: `focuswatch` (`collect_windows.go` + заглушка
+  `collect_other.go`) и `soundwatch` (`wasapi_windows.go` + заглушка
+  `wasapi_other.go`) — сборка на любой ОСи уже проходит, фичи деградируют
+  вежливо (JSON с причиной, оболочка не танцует, «понимания окна» нет).
+- Electron: `workArea`, прозрачность, `skipTaskbar`, `setAlwaysOnTop`,
+  Tray, `setLoginItemSettings` — API общие; масштаб экрана учитывается
+  через рабочий регион, а не через win32- DPI.
+- TTS/STT ищутся через `exec.LookPath("edge-tts")` / `exec.LookPath("python")`
+  — путь к бинарнику, а не фиксированный `.exe`.
+
+### Границы фич по ОСям (честно, что можно и что нельзя)
+
+| Фича | Windows (есть) | Linux | macOS |
+|---|---|---|---|
+| Окно, диалог, память, характер, тело, сон, прогулки, посадка | ✅ | ✅ | ✅ |
+| Понимание активного окна (focus) | ✅ user32 | X11: `_NET_ACTIVE_WINDOW` + `_NET_WM_NAME`/`_NET_WM_PID` через нативный X-протокол (чистый Go, сокет `/tmp/.X11-unix`); idle — расширение MIT-SCREEN-SAVER. Wayland: глобального следа нет → вежливая заглушка (XDG_SESSION_TYPE) | NSWorkspace.frontmostApplication (именованное приложение без спецразрешений); координаты окна — CGWindowList (полные — с Accessibility). idle — CGEventSourceSecondsSinceLastEventType (без разрешений) |
+| Танец под системный звук (loopback) | ✅ WASAPI | PulseAudio monitor source (нативный протокол по unix-сокету, чистый Go; PipeWire через pipewire-pulse тем же путём). Нет Pulse — заглушка | Системного loopback в macOS НЕТ (Core Audio не отдаёт звук устройств без стороннего виртуального драйвера). Честно: танец от (а) её собственной озвучки (feed, как сейчас) и (б) опционально микрофона «музыка из колонок» — RMS считается на странице, звук не сохраняется и не уходит никуда |
+| Автозапуск | ✅ реестр | XDG: файл `~/.config/autostart/friend.desktop` (`setLoginItemSettings` на Linux не работает — отдельная ветка в ipc `app:autostart`) | ✅ `setLoginItemSettings` |
+| Трей | ✅ | через AppIndicator (нужен `libappindicator`; нет библиотеки — прячем трей, «скрыть в трей» деградирует в «скрыть окно») | ✅ (иконка-шаблон, светлая/тёмная) |
+| Микрофон (wake word, STT) | ✅ | ✅ (PulseAudio) | ✅, при первом включении — системный диалог TCC; в package.json electron-builder прописываем `NSMicrophoneUsageDescription` |
+| Прозрачное окно поверх всего | ✅ | нужен активный композитор (GNOME/KDE по умолчанию есть; чистый X11 без композитора — фон окна станет непрозрачным, это ограничение композитора) | ✅ |
+
+### Этап 8а. Linux (делаем первым)
+
+1. `server/cmd/focuswatch/collect_linux.go` (build tag linux): X11-протокол
+   чистым Go (открыть сокет `/tmp/.X11-unix/X0`, handshake, `GetProperty`
+   `_NET_ACTIVE_WINDOW` → `GetGeometry`+`_NET_WM_NAME`+`_NET_WM_PID`),
+   idle — MIT-SCREEN-SAVER `QueryInfo` (цикл 1 с). Схема вывода та же:
+   `{"process":…,"title":…,"idle":сек}`. Wayland: заглушка с ясной причиной.
+2. `server/cmd/soundwatch/level_linux.go` (build tag linux): PulseAudio
+   native protocol (cookie auth → `/run/user/$UID/pulse/native`, handshake,
+   `CREATE_STREAM` record с `source-snapshot` монитора; RMS тот же код, что
+   в wasapi-петле). Нет Pulse → тот же вежливый JSON.
+3. Автозапуск Linux: в `desktop/main.js` развилка `process.platform === 'linux'`
+   — писать/удалять `~/.config/autostart/friend.desktop` (Exec=path к
+   билду, X-GNOME-Autostart-enabled).
+4. `start.sh`: `go build` → бинарь `companion` без `.exe`, запуск electron;
+   `chmod +x`.
+5. Проверка: самопроверка под `xvfb-run` (CI), фокус-тест — запускаем
+   `xterm`, ждём в потоке его имя; звук — тест схемы (Pulse на CI нет →
+   заглушка с причиной ok).
+
+### Этап 8б. macOS
+
+1. `server/cmd/focuswatch/collect_darwin.go`: pure Go через `dlopen`
+   (libobjc send/alloc + NSWorkspace, CGWindowListCopyWindowInfo,
+   CGEventSourceSecondsSinceLastEventType); без cgo. Активное приложение
+   — без разрешений; границы окон — с Accessibility-разрешением (нет —
+   `bounds: null`, страница живёт без «на окне»).
+2. `server/cmd/soundwatch/level_darwin.go`: возвращает честную причину
+   «нет системного loopback». Танец на Mac: feed её голоса (работает) +
+   опция «слышать колонки через микрофон» (страница считает RMS из
+   getUserMedia — тот же приватный контур, что wake word).
+3. Автозапуск трей — родные Electron-механизмы; `NSMicrophoneUsageDescription`
+   в build-конфиге.
+4. `start.command` (+ chmod) и `electron-builder` dmg (arm64+x64).
+5. Проверка: `go build`+`go test` в CI на macos-latest; полная самопроверка —
+   руками на живом Маке (на CI у macOS нет window server, GUI-тесты не гоняем).
+
+### Этап 8в. Упаковка и CI (общее)
+
+1. `electron-builder`: Windows NSIS, macOS dmg, Linux AppImage+deb; Go-бинарь
+   (companion, focuswatch, soundwatch) внутри пакета (`extraResources`),
+   сборка Go под нужную ОСь в prebuild-шаге.
+2. GitHub Actions матрица `windows / ubuntu / macos`: `go vet`, `go test`,
+   сборка всех трёх бинарей на каждой ОСи (GOOS cross-compile) + `npm build`;
+   Linux-часть самопроверки — `xvfb-run npx electron . --selftest`.
+3. README: раздел «Запуск на своей системе» (win/linux/mac) + таблица
+   границ фич (из этого раздела, человеческим языком).
+4. Аудит путей: греп фиксированных `\` в Go-строках и `%AppData%` вне
+   UserConfigDir (страница localStorage — ок, сервер — конфиг-дири).
+
+### Риски и ограничения (чтобы не обещать лишнего)
+
+- Wayland: слежение за окнами невозможно из песочницы — фича «понимание
+  окна» и «посадка на окне» на Wayland не работает (X11-сессии — работают).
+- macOS: танец под чужую музыку без стороннего виртуального аудиодрайвера
+  невозможен — остаётся её голос и опциональный микрофон.
+- Linux без композитора: прозрачность окна — на совести окружения.
+- Linux-трей: без `libappindicator` трей не ставим (EPA: окно остаётся,
+  «скрыть» сворачивается в невидимость как сейчас).
+- faster-whisper/edge-tts на mac/linux: ставит человек (`pip install`),
+  модель 75 МБ качается один раз при первом включении.
+
+### Порядок сдачи
+
+8а (Linux) → 8б (macOS) → 8в (упаковка+CI). Каждый подэтап: `go test`
+зелёный, живая самопроверка на соответствующей ОСи, вывод в README.
+Windows-часть (24 части) при этом не должна деградировать ни на одну строку.
 
 ## Сетка проверок (как убедиться, что этап сделан)
 
