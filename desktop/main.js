@@ -2189,9 +2189,15 @@ async function runSelfTest() {
           if (fw && fw.y === T.y) targetNow = fw;
         }
         if (!targetNow) return { ok: false, why: 'мишень не приехала' };
+        // Переезд за новой мишенью. Страница пересаживает сама, когда
+        // приходит новая строка помощника, — в прогоне строки идут раз в
+        // секунду и на нагруженной машине этого не хватало (окно оставалось
+        // на прежней кромке). Пересаживаем явно раз в секунду, как это делает
+        // живой обработчик фокуса, и ждём до 10 с.
         let a2 = fa.anchor();
-        for (let i = 0; i < 40 && Math.abs(a2.y - T.y) > 3; i++) {
+        for (let i = 0; i < 100 && Math.abs(a2.y - T.y) > 3; i++) {
           await new Promise((r) => setTimeout(r, 100));
+          if (i % 10 === 9) { fa.menu.setSeat('window'); await fa.applySeat('window'); }
           a2 = fa.anchor();
         }
         return { ok: Math.abs(a2.y - T.y) <= 3 && a2.x >= T.x && a2.x <= T.x + T.w, ay: Math.round(a2.y), ty: T.y, ax: Math.round(a2.x) };

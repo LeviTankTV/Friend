@@ -18,6 +18,82 @@ func cfg() Config {
 	}
 }
 
+// Ночная бережность (этап 9д): глубокая ночь + редактор час и больше —
+// одна мягкая реплика про него. Требует код-окно; браузер не трогает;
+// одна за ночь; днём не срабатывает.
+func TestNightCareForEditor(t *testing.T) {
+	s := New(cfg())
+	seed(t, s, day(20, 0))
+	// Ночной ритуал уже сказан (ночь началась в 23:00, ритуал — в 23:05) —
+	// дальше по приоритету идёт бережность. Отстоять надо не меньше
+	// удвоенного анти-спама: в редакторе он «занят».
+	s.MarkSent(KindNight, day(23, 5))
+	s.MarkSent(KindSilence, day(22, 40)) // только обнуляет анти-спам
+
+	in := Inputs{
+		Now: day(23, 40), LastInput: day(23, 35),
+		HasFocus: true, Focus: focus.Snapshot{
+			Process: "goland64.exe", Kind: focus.KindCode, Label: "GoLand", Since: day(22, 30),
+		},
+	}
+	ev, ok := s.Tick(in)
+	if !ok || ev.Kind != KindCare {
+		t.Fatalf("час в редакторе в глубокой ночи — бережность: ok=%v ev=%+v", ok, ev)
+	}
+	if !strings.Contains(ev.Reason, "GoLand") || !strings.Contains(ev.Reason, "22:30") {
+		t.Fatalf("в поводе должны быть метка окна и время начала: %q", ev.Reason)
+	}
+	s.MarkSent(ev.Kind, day(23, 40))
+	if ev, ok := s.Tick(Inputs{
+		Now: day(23, 50), LastInput: day(23, 45),
+		HasFocus: true, Focus: focus.Snapshot{Process: "goland64.exe", Kind: focus.KindCode, Since: day(22, 30)},
+	}); ok {
+		t.Fatalf("за одну ночь бережность произносится один раз: %+v", ev)
+	}
+	// Тот же редакторский марафон, но НЕ ночь (12:40) — бережность молчит,
+	// живёт обычный «чай в редакторе».
+	s2 := New(cfg())
+	seed(t, s2, day(9, 0))
+	if ev, ok := s2.Tick(Inputs{
+		Now: day(12, 40), LastInput: day(12, 35), LastSay: day(9, 0),
+		HasFocus: true, Focus: focus.Snapshot{Process: "code.exe", Kind: focus.KindCode, Label: "VS Code", Since: day(10, 0)},
+	}); ok && ev.Kind == KindCare {
+		t.Fatalf("днём ночная бережность не звучит: %+v", ev)
+	}
+}
+
+// Поддразнивание игрой (этап 9д): полтора часа в игре — одна тёплая реплика
+// на заход; смена игры обнуляет счёт; ночью молчит.
+func TestGameTease(t *testing.T) {
+	s := New(cfg())
+	seed(t, s, day(12, 0))
+
+	in := Inputs{
+		Now: day(14, 0), LastInput: day(13, 55), LastSay: day(12, 0),
+		HasFocus: true, Focus: focus.Snapshot{
+			Process: "steam.exe", Kind: focus.KindGame, Label: "Cyberpunk", Since: day(12, 20),
+		},
+	}
+	ev, ok := s.Tick(in)
+	if !ok || ev.Kind != KindGame {
+		t.Fatalf("полтора часа в игре — поддразнить: ok=%v ev=%+v", ok, ev)
+	}
+	s.MarkSent(ev.Kind, day(14, 0))
+	if ev, ok := s.Tick(Inputs{
+		Now: day(15, 0), LastInput: day(14, 55), LastSay: day(12, 0),
+		HasFocus: true, Focus: focus.Snapshot{Process: "steam.exe", Kind: focus.KindGame, Since: day(12, 20)},
+	}); ok {
+		t.Fatalf("про этот заход в игру она уже поддела: %+v", ev)
+	}
+	// Ночь (окно тишины) — игра молчит.
+	if ev, ok := s.Tick(Inputs{
+		Now: day(23, 30).AddDate(0, 0, 1), LastInput: day(23, 25).AddDate(0, 0, 1), LastSay: day(12, 0),
+		HasFocus: true, Focus: focus.Snapshot{Process: "steam.exe", Kind: focus.KindGame, Label: "Cyberpunk", Since: day(22, 0).AddDate(0, 0, 1)},
+	}); ok && ev.Kind == KindGame {
+		t.Fatalf("в окно тишины игра не поёт: %+v", ev)
+	}
+}
+
 // Планировщик выключен — молчит любой тик, любой час, любая обстановка
 // (так самопроверка глушит инициативы, чтобы они не шумели в проверки).
 func TestDisabledIsSilent(t *testing.T) {

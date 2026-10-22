@@ -47,6 +47,13 @@ const (
 	// Отличается от KindSleep: «иди спать» — про 3 часа ночи и уговор,
 	// ритуал — про начало ночи (23:00) и про «я рядом», без уговора.
 	KindNight Kind = "night"
+	// KindCare — ночная бережность (этап 9д): поздно ночью он в редакторе
+	// не первый час. Не «иди спать» и не ритуал — про него лично:
+	// «ты здесь с 23:00, передышка?».
+	KindCare Kind = "care"
+	// KindGame — поддразнивание игрой (этап 9д): долго в игре — короткая
+	// тёплая реплика с улыбкой («опять?»), без упрёка.
+	KindGame Kind = "game"
 )
 
 // Пороги триггеров. Всё, что стоит за числом с объяснением.
@@ -59,6 +66,8 @@ const (
 	IdleGap        = 2 * time.Hour    // «засыпать» дважды за короткий прогон нельзя
 	WaterGap       = 3 * time.Hour    // если в конфиге FoodReminder меньше, он и есть
 	AppMarathonMin = 2 * time.Hour    // «в редакторе уже 2 часа»
+	GameMarathon   = 90 * time.Minute // «в игре уже полтора часа» — поддразнить
+	CareMarathon   = 60 * time.Minute // час в редакторе ночью — бережность
 	PresenceMax    = 20 * time.Minute // после этого он уже «не рядом»
 	SilenceMin     = 60 * time.Minute // час молчания при нём — повод мягко появиться
 )
@@ -112,7 +121,9 @@ type Scheduler struct {
 	lastAttempt   time.Time // когда она пыталась сказать (успешно или нет)
 	lastSleep     time.Time // «иди спать» сегодня уже было?
 	lastNight     time.Time // ночной ритуал «пора спать, я рядом» уже был за эту ночь?
+	lastCare      time.Time // ночная бережность про редактор уже была за эту ночь?
 	lastAppNag    time.Time // «чай в редакторе» уже было? (для этого захода в приложение)
+	lastGameNag   time.Time // «опять в игре?» уже было? (для этого захода в игру)
 	lastDayPart   persona.DayPart
 	seeded        bool
 }
@@ -207,10 +218,12 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 	}
 	cands := []cand{
 		{KindNight, s.night, rule{allowQuiet: true}},
+		{KindCare, s.care, rule{allowQuiet: true}},
 		{KindSleep, s.sleep, rule{allowQuiet: true}},
 		{KindIdle, s.idle, rule{allowQuiet: true}},
 		{KindWater, s.water, rule{}},
 		{KindApp, s.app, rule{}},
+		{KindGame, s.game, rule{}},
 		{KindMorning, s.morning, rule{}},
 		{KindEvening, s.evening, rule{}},
 		{KindSilence, s.silence, rule{}},
@@ -328,6 +341,65 @@ func (s *Scheduler) water(in Inputs) (Event, bool) {
 		int(in.Now.Sub(s.started).Minutes()))}, true
 }
 
+// care — ночная бережность (этап 9д): глубокая ночь (то же окно, что и у
+// ритуала: 23:00–3:00), он в редакторе кода час и больше, рядом. Одна за
+// ночь. Это не «иди спать» — про него лично: мягкая бережность и передышка.
+func (s *Scheduler) care(in Inputs) (Event, bool) {
+	h := in.Now.Hour()
+	if h >= SleepFromHour && h < NightFromHour {
+		return Event{}, false // не глубокая ночь
+	}
+	if !in.HasFocus || in.Focus.Kind != focus.KindCode {
+		return Event{}, false // бережность — про редактор, не про браузер
+	}
+	since := in.Now.Sub(in.Focus.Since)
+	if since < CareMarathon {
+		return Event{}, false // засиделся недолго
+	}
+	nightDay := in.Now
+	if h < SleepFromHour {
+		nightDay = in.Now.Add(-24 * time.Hour)
+	}
+	nightStart := time.Date(nightDay.Year(), nightDay.Month(), nightDay.Day(),
+		NightFromHour, 0, 0, 0, in.Now.Location())
+	if !s.lastCare.IsZero() && !s.lastCare.Before(nightStart) {
+		return Event{}, false // в эту ночь она это уже сказала
+	}
+	if !present(in) {
+		return Event{}, false
+	}
+	hours := int(since.Hours())
+	return Event{Kind: KindCare, Reason: fmt.Sprintf(
+		"Сейчас %s, глубокая ночь, а он в редакторе («%s») уже %d часов подряд. "+
+			"ОДНА короткая мягкая реплика ПРО НЕГО: бережность и предложение передышки — "+
+			"«ты здесь с %s, передышка?». Не приказ, не мораль, не конкурирует с «иди спать».",
+		in.Now.Format("15:04"), in.Focus.Label, hours, in.Focus.Since.Format("15:04"))}, true
+}
+
+// game — поддразнивание игрой (этап 9д): полтора часа в игре — короткая
+// тёплая реплика с улыбкой. Окно тишины её подавляет (ночью игры не
+// комментируем), одна реплика на заход в игру, как с чаем в редакторе.
+func (s *Scheduler) game(in Inputs) (Event, bool) {
+	if !in.HasFocus || in.Focus.Kind != focus.KindGame {
+		return Event{}, false
+	}
+	since := in.Now.Sub(in.Focus.Since)
+	if since < GameMarathon {
+		return Event{}, false
+	}
+	if !s.lastGameNag.IsZero() && !s.lastGameNag.Before(in.Focus.Since) {
+		return Event{}, false // про этот заход в игру она уже подделa
+	}
+	if !present(in) {
+		return Event{}, false
+	}
+	half := int(since.Minutes() / 60)
+	return Event{Kind: KindGame, Reason: fmt.Sprintf(
+		"Он в игре («%s») уже %d с лишним часов. Одна короткая тёплая реплика "+
+			"с улыбкой — поддразнить («опять?»), без упрёка и не звать закрывать.",
+		in.Focus.Label, half)}, true
+}
+
 // app — два часа в редакторе кода. Одна реплика на заход в приложение
 // (счёт Since — от последней смены приложения).
 func (s *Scheduler) app(in Inputs) (Event, bool) {
@@ -411,8 +483,8 @@ func (s *Scheduler) silence(in Inputs) (Event, bool) {
 	}
 	minutes := int(in.Now.Sub(last).Minutes())
 	return Event{Kind: KindSilence, Reason: fmt.Sprintf(
-		"Он рядом, но молчит уже %d минут. Скажи ОДНУ короткую свою реплику: "+
-			"наблюдение, вопрос, шалость — что угодно, только не «чем помочь».", minutes)}, true
+		"Он рядом, но молчит уже %d минут. Спроси ЕГО лично — «ты тут, всё в "+
+			"порядке?» — тепло и про него, а не «у всех» и не «чем помочь».", minutes)}, true
 }
 
 // MarkSent отмечает ОТПРАВЛЕННУЮ реплику: она обнуляет отсчёт анти-спама,
@@ -429,8 +501,12 @@ func (s *Scheduler) MarkSent(kind Kind, now time.Time) {
 		s.lastSleep = now
 	case KindNight:
 		s.lastNight = now
+	case KindCare:
+		s.lastCare = now
 	case KindApp:
 		s.lastAppNag = now
+	case KindGame:
+		s.lastGameNag = now
 	case KindMorning, KindEvening:
 		s.lastDayPart = persona.PartOf(now)
 	}
