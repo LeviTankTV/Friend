@@ -44,6 +44,8 @@
                             // интервалом: порог пика — уровень, а не мс)
   let loudStreak = 0;
   let lastLoudAt = 0;
+  let lastMusicLoudAt = 0;  // последняя ВНЕШНЯЯ громкость (её голос — не музыка)
+  let feedSelf = null;      // тест: режим «она говорит» подменяет isSelf
   let dancing = false;
   let bpm = 0;
   let error = '';
@@ -66,13 +68,16 @@
   function tick() {
     const now = Date.now();
     let lv = Math.max(0, Math.min(1, readLevel()));
-    if (opts.isSelf && opts.isSelf()) {
-      // Её голос из колонок неотличим от музыки по уровню. Танцевать под
-      // себя «как попало» криво: считаем её голос музыкой с ровным темпом
-      // (500 мс).
-      lv = Math.max(lv, floor + LOUD_ABOVE + 0.02);
-      if (now - lastPeakAt >= PEAK_MIN_MS) { peaks.push(500); peaks = peaks.slice(-12); lastPeakAt = now; }
-    }
+    // Голос в микшере неотличим от музыки по уровню, и по решению человека
+    // её собственный голос танец НЕ продлевает: кончилась музыка — кончился и
+    // танец, даже если она продолжает говорить реплики (баг «не перестаёт
+    // танцевать, когда музыки уже нет»: каждый её ответ по чату обновлял
+    // «последнюю громкость», и танец не кончался никогда). Поэтому в тишине
+    // без музыки (последняя внешняя громкость была старше паузы) её речь для
+    // детектора — тишина. Пока музыка играет, её голос в миксе остаётся как
+    // есть: репликами под музыкой танец не обрывается.
+    const selfNow = feedSelf !== null ? !!feedSelf : !!(opts.isSelf && opts.isSelf());
+    if (selfNow && now - lastMusicLoudAt > LOUD_OFF_MS) lv = Math.min(lv, floor);
     level = lv;
     // Порог комнаты: вниз — быстро (услышала тишину), вверх — еле-еле
     // (не должен вырасти от самой музыки).
@@ -84,6 +89,7 @@
     if (loud) {
       loudStreak++;
       lastLoudAt = now;
+      if (!selfNow) lastMusicLoudAt = now;  // её голос «музыкой» не считается
       // Пик (удар бита): всплеск заметно выше среднего пика, не чаще раза
       // в 140 мс. Интервалы между пиками дают темп.
       const boost = lv - floor;
@@ -140,6 +146,7 @@
     if (running && opts && opts.setCapture) opts.setCapture(false);
     running = false;
     dancing = false; loudStreak = 0; peaks = []; lastPeakAt = 0; avgBoost = 0;
+    lastMusicLoudAt = 0;
     if (was && opts && opts.onState) opts.onState({ dancing: false, bpm: 0 });
   }
 
@@ -150,13 +157,18 @@
     stop();
     feedFn = () => feedLevel;
     feedLevel = 0.01;
+    feedSelf = null;
     floor = 0.02;
     timer = setInterval(tick, TICK_MS);
   }
   function feedLevelSet(v) { feedLevel = v; }
+  // Тест «она говорит» без настоящего TTS: feedSelf(true) — модуль считает,
+  // что в колонках её реплика (уровень высокий, музыки нет).
+  function feedSelfSet(on) { feedSelf = !!on; }
   function feedStop() {
     if (timer) { clearInterval(timer); timer = 0; }
     feedFn = null;
+    feedSelf = null;
     dancing = false; loudStreak = 0; peaks = []; lastPeakAt = 0; avgBoost = 0;
     if (opts && opts.onState) opts.onState({ dancing: false, bpm: 0 });
   }
@@ -174,6 +186,6 @@
   }
 
   global.FriendMusic = {
-    attach: (o) => { opts = o; return { start, stop, state, pushLevel, feedStart, feedLevelSet, feedStop }; },
+    attach: (o) => { opts = o; return { start, stop, state, pushLevel, feedStart, feedLevelSet, feedSelfSet, feedStop }; },
   };
 })(window);

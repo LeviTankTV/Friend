@@ -2289,13 +2289,24 @@ async function runSelfTest() {
         off = m.state().dancing === false;
       }
       const avatarOff = !fa.avatar.dancing();
+      // Её голос вне музыки танец НЕ продлевает (баг «не перестаёт танцевать,
+      // когда музыки уже нет»): 10 с «говорит» громко в тишине — танца нет.
+      m.feedSelfSet(true);
+      m.feedLevelSet(0.30);
+      let keptDancing = false;
+      for (let k = 0; k < 100; k++) {
+        await t(100);
+        if (m.state().dancing) keptDancing = true;
+      }
+      m.feedSelfSet(false);
       m.feedStop();
       return {
         ok: floorQuiet < 0.02 && dancing && bpm >= 90 && bpm <= 170 &&
-          avatarDancing && off && avatarOff,
+          avatarDancing && off && avatarOff && !keptDancing,
         why: 'пол ' + floorQuiet + ', танец ' + dancing + ' ' + bpm +
           ' у/мин аватар ' + avatarDancing + ', тишина off ' + off +
-          ' аватар ' + avatarOff + ', помощник ' + real +
+          ' аватар ' + avatarOff + ', голос без музыки ' + keptDancing +
+          ', помощник ' + real +
           (realState.error ? ' (' + realState.error + ')' : ''),
       };
     })()`);
