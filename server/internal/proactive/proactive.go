@@ -43,10 +43,15 @@ const (
 	KindMorning Kind = "morning" // утро началось
 	KindEvening Kind = "evening" // вечер: как прошёл день
 	KindSilence Kind = "silence" // он рядом, но молчит
+	// KindNight — ритуал глубокой ночи (этап 9г): «пора спать, я рядом».
+	// Отличается от KindSleep: «иди спать» — про 3 часа ночи и уговор,
+	// ритуал — про начало ночи (23:00) и про «я рядом», без уговора.
+	KindNight Kind = "night"
 )
 
 // Пороги триггеров. Всё, что стоит за числом с объяснением.
 const (
+	NightFromHour  = 23               // с этого часа — ритуал «пора спать, я рядом»
 	SleepFromHour  = 3                // с этого часа можно сказать «иди спать»
 	SleepToHour    = 7                // до этого (ночью она в целом молчит)
 	SleepGap       = 3 * time.Hour    // и одна, и вторая ночная реплика не чаще
@@ -59,7 +64,10 @@ const (
 )
 
 // Config — настройки из конфига (proactive.*), уже переваренные в длительности.
+// Enabled=false — она никогда не заговаривает первой (самопроверка глушит
+// планировщик, чтобы проактивные реплики не шумели в середину проверок).
 type Config struct {
+	Enabled       bool
 	MinGap        time.Duration // анти-спам: минимум между её инициативами
 	FoodReminder  time.Duration // как часто напоминать про воду
 	QuietFromHour int           // окно тишины, час начала (23)
@@ -103,6 +111,7 @@ type Scheduler struct {
 	lastProactive time.Time // когда была ОТПРАВЛЕНА последняя её инициатива
 	lastAttempt   time.Time // когда она пыталась сказать (успешно или нет)
 	lastSleep     time.Time // «иди спать» сегодня уже было?
+	lastNight     time.Time // ночной ритуал «пора спать, я рядом» уже был за эту ночь?
 	lastAppNag    time.Time // «чай в редакторе» уже было? (для этого захода в приложение)
 	lastDayPart   persona.DayPart
 	seeded        bool
@@ -172,6 +181,10 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !s.cfg.Enabled {
+		return Event{}, false // планировщик выключен человеком (или самопроверкой)
+	}
+
 	if !s.seeded {
 		// Первый тик: запоминаем текущую часть суток, не считая её «сменой».
 		// Иначе каждое включение сервера вечером начиналось бы репликой
@@ -193,6 +206,7 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 		rule rule
 	}
 	cands := []cand{
+		{KindNight, s.night, rule{allowQuiet: true}},
 		{KindSleep, s.sleep, rule{allowQuiet: true}},
 		{KindIdle, s.idle, rule{allowQuiet: true}},
 		{KindWater, s.water, rule{}},
@@ -216,6 +230,34 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 		return ev, true
 	}
 	return Event{}, false
+}
+
+// night — ритуал глубокой ночи (этап 9г): начало ночи в 23:00, он ещё не
+// ложится — ОДНА тёплая короткая реплика «пора спать, я рядом». Это не уговор
+// (уговор — KindSleep в три часа): здесь она сама засыпает и показывает, что
+// она рядом. Разрешена в окно тишины, одна за ночь (ночь = от 23:00; для
+// часов после полуночи ночь началась «вчера»).
+func (s *Scheduler) night(in Inputs) (Event, bool) {
+	h := in.Now.Hour()
+	if h >= SleepFromHour && h < NightFromHour {
+		return Event{}, false // 3:00–23:00 — глубокая ночь не идёт
+	}
+	nightDay := in.Now
+	if h < SleepFromHour {
+		nightDay = in.Now.Add(-24 * time.Hour) // 01:30 — ночь началась вчера в 23:00
+	}
+	nightStart := time.Date(nightDay.Year(), nightDay.Month(), nightDay.Day(),
+		NightFromHour, 0, 0, 0, in.Now.Location())
+	if !s.lastNight.IsZero() && !s.lastNight.Before(nightStart) {
+		return Event{}, false // в эту ночь ритуал уже сказан
+	}
+	if !present(in) {
+		return Event{}, false // ритуал — тому, кто ещё бодрствует рядом
+	}
+	return Event{Kind: KindNight, Reason: fmt.Sprintf(
+		"Глубокая ночь, сейчас %s. Он всё ещё не ложится. Скажи ОДНУ короткую тёплую "+
+			"фразу от себя: ты сама уже засыпаешь и ты рядом с ним — «пора спать, я рядом». "+
+			"Не читай мораль и не уговаривай второй раз.", in.Now.Format("15:04"))}, true
 }
 
 // sleep — «иди спать». Разрешена в окно тишины: смысл реплики именно в том,
@@ -308,8 +350,19 @@ func (s *Scheduler) app(in Inputs) (Event, bool) {
 		in.Focus.Label, hours)}, true
 }
 
+// editorFact — факт про редактор для ритуальных поводов (этап 9г): если активное
+// окно правда «код», повод получает это как факт. Реплику по факту строит модель
+// — планировщик только передаёт, что видит.
+func editorFact(in Inputs) string {
+	if in.HasFocus && in.Focus.Kind == focus.KindCode {
+		return "Он уже в редакторе («" + in.Focus.Label + "»)."
+	}
+	return ""
+}
+
 // morning / evening — смена части суток. Реакция на СМЕНУ, а не на факт:
-// заход сервера утром не должен выглядеть как «она заметила утро».
+// заход сервера утром не должен выглядеть как «она заметила утро». Ритуал
+// (этап 9г) несёт время суток и факт про редактор — реплика короткая, по факту.
 func (s *Scheduler) morning(in Inputs) (Event, bool) {
 	if s.lastDayPart == persona.Morning || persona.PartOf(in.Now) != persona.Morning {
 		return Event{}, false
@@ -317,8 +370,12 @@ func (s *Scheduler) morning(in Inputs) (Event, bool) {
 	if !present(in) {
 		return Event{}, false
 	}
-	return Event{Kind: KindMorning, Reason: "Началось утро. Поздоровайся с ним коротко и бодро — одной репликой, " +
-		"без плана на день и без «высыпался ли»."}, true
+	reason := fmt.Sprintf("Началось утро, сейчас %s. Поздоровайся с ним коротко и бодро — одной репликой, "+
+		"без плана на день и без «высыпался ли».", in.Now.Format("15:04"))
+	if fact := editorFact(in); fact != "" {
+		reason += " " + fact + " Можешь удивиться этому в одном слове."
+	}
+	return Event{Kind: KindMorning, Reason: reason}, true
 }
 
 func (s *Scheduler) evening(in Inputs) (Event, bool) {
@@ -328,8 +385,12 @@ func (s *Scheduler) evening(in Inputs) (Event, bool) {
 	if !present(in) {
 		return Event{}, false
 	}
-	return Event{Kind: KindEvening, Reason: "Начался вечер. Коротко спроси, как у него прошёл день — одной репликой, " +
-		"и не превращай вопрос в анкету."}, true
+	reason := fmt.Sprintf("Начался вечер, сейчас %s. Коротко спроси, как у него прошёл день — одной репликой, "+
+		"и не превращай вопрос в анкету.", in.Now.Format("15:04"))
+	if fact := editorFact(in); fact != "" {
+		reason += " " + fact + " Это можно упомянуть в вопросе."
+	}
+	return Event{Kind: KindEvening, Reason: reason}, true
 }
 
 // silence — он рядом, но молчит. Самый мягкий триггер: и молчание занятого
@@ -366,6 +427,8 @@ func (s *Scheduler) MarkSent(kind Kind, now time.Time) {
 	switch kind {
 	case KindSleep:
 		s.lastSleep = now
+	case KindNight:
+		s.lastNight = now
 	case KindApp:
 		s.lastAppNag = now
 	case KindMorning, KindEvening:

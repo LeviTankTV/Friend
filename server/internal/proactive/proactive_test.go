@@ -10,10 +10,25 @@ import (
 
 func cfg() Config {
 	return Config{
+		Enabled:       true,
 		MinGap:        25 * time.Minute,
 		FoodReminder:  3 * time.Hour,
 		QuietFromHour: 23,
 		QuietToHour:   7,
+	}
+}
+
+// Планировщик выключен — молчит любой тик, любой час, любая обстановка
+// (так самопроверка глушит инициативы, чтобы они не шумели в проверки).
+func TestDisabledIsSilent(t *testing.T) {
+	c := cfg()
+	c.Enabled = false
+	s := New(c)
+	s.SetStarted(day(18, 0))
+	for _, at := range []time.Time{day(19, 0), day(23, 30), day(3, 30)} {
+		if ev, ok := s.Tick(Inputs{Now: at, LastInput: at.Add(-time.Hour), LastSay: day(12, 0)}); ok {
+			t.Fatalf("выключенный планировщик заговорил в %v: %+v", at, ev)
+		}
 	}
 }
 
@@ -67,22 +82,101 @@ func TestSleepAllowedInQuiet(t *testing.T) {
 	}
 }
 
-func TestQuietSuppressesEverythingExceptSleepAndIdle(t *testing.T) {
+func TestQuietSuppressesEverythingExceptNightSleepAndIdle(t *testing.T) {
 	s := New(cfg())
 	seed(t, s, day(20, 0)) // вечер прогрет, про смену вечером молчим
 
-	// 23:30: молчание, вода и вечер — всё подавлено окном тишины.
-	if ev, ok := s.Tick(Inputs{
+	// 23:30: в окно тишины проходит только ночной ритуал («пора спать, я
+	// рядом») — он ради ночи и придуман; молчание, вода и вечер подавлены.
+	ev, ok := s.Tick(Inputs{
 		Now: day(23, 30), LastInput: day(23, 25), LastSay: day(18, 0),
 		HasFocus: true, Focus: focus.Snapshot{Process: "chrome.exe", Kind: focus.KindBrowser},
-	}); ok {
-		t.Fatalf("в окно тишины нечего говорить, получил %+v", ev)
+	})
+	if !ok || ev.Kind != KindNight {
+		t.Fatalf("в 23:30 обязан пройти только ночной ритуал: ok=%v ev=%+v", ok, ev)
 	}
-	// 4:30 (ночь): «засыпаю» — можно (данные о мыши есть).
+	s.MarkSent(ev.Kind, day(23, 30))
+	// 23:40: ритуал этой ночи сказан, остальное — окно тишины.
 	if ev, ok := s.Tick(Inputs{
-		Now: day(4, 30), LastInput: day(4, 0), // пропал на 30 мин
+		Now: day(23, 40), LastInput: day(23, 35), LastSay: day(18, 0),
+		HasFocus: true, Focus: focus.Snapshot{Process: "chrome.exe", Kind: focus.KindBrowser},
+	}); ok {
+		t.Fatalf("после ритуала в окно тишины говорить нечем: %+v", ev)
+	}
+	// 4:30 УТРА (следующего дня: ночь 23:30 уже позади): «засыпаю» — можно
+	// (данные о мыши есть).
+	if ev, ok := s.Tick(Inputs{
+		Now: day(4, 30).AddDate(0, 0, 1), LastInput: day(4, 0).AddDate(0, 0, 1), // пропал на 30 мин
 	}); !ok || ev.Kind != KindIdle {
 		t.Fatalf("«я засыпаю» ночью обязано проходить: ok=%v ev=%+v", ok, ev)
+	}
+}
+
+// Ночной ритуал (этап 9г): «пора спать, я рядом» — с 23:00, одна за ночь
+// (ночь = от 23:00, послеполуночные часы ночуют «вчера»), только рядом.
+func TestNightRitualOncePerNight(t *testing.T) {
+	s := New(cfg())
+	seed(t, s, day(20, 0))
+
+	// 22:30 — глубокая ночь ещё не началась.
+	if ev, ok := s.Tick(Inputs{Now: day(22, 30), LastInput: day(22, 25)}); ok && ev.Kind == KindNight {
+		t.Fatalf("до 23:00 ночного ритуала быть не должно: %+v", ev)
+	}
+	// 23:10 — ритуал с временем в поводе.
+	ev, ok := s.Tick(Inputs{Now: day(23, 10), LastInput: day(23, 5)})
+	if !ok || ev.Kind != KindNight {
+		t.Fatalf("в 23:10 ритуал обязан сработать: ok=%v ev=%+v", ok, ev)
+	}
+	if !strings.Contains(ev.Reason, "23:10") {
+		t.Fatalf("в поводе должно быть время: %q", ev.Reason)
+	}
+	s.MarkSent(ev.Kind, day(23, 10))
+	// Та же ночь, 1:30 — ритуал уже сказан (ночь началась вчера в 23:00).
+	if ev, ok := s.Tick(Inputs{Now: day(1, 30), LastInput: day(1, 25)}); ok && ev.Kind == KindNight {
+		t.Fatalf("за одну ночь ритуал произносится один раз: %+v", ev)
+	}
+	// Следующая ночь 23:05 — снова можно.
+	if ev, ok := s.Tick(Inputs{
+		Now: day(23, 5).AddDate(0, 0, 1), LastInput: day(23, 0).AddDate(0, 0, 1),
+	}); !ok || ev.Kind != KindNight {
+		t.Fatalf("на следующую ночь ритуал обязан обновиться: ok=%v ev=%+v", ok, ev)
+	}
+}
+
+// Ритуалы утра и вечера (этап 9г) несут время суток и факт про редактор.
+func TestRitualsCarryTimeAndEditorFact(t *testing.T) {
+	s := New(cfg())
+	seed(t, s, day(3, 0)) // ночь: утро станет сменой, а не фактом
+
+	ev, ok := s.Tick(Inputs{
+		Now: day(7, 5), LastInput: day(7, 0), LastSay: day(6, 50),
+		HasFocus: true, Focus: focus.Snapshot{
+			Process: "goland64.exe", Kind: focus.KindCode, Label: "GoLand", Since: day(6, 30),
+		},
+	})
+	if !ok || ev.Kind != KindMorning {
+		t.Fatalf("утренний ритуал обязан сработать: ok=%v ev=%+v", ok, ev)
+	}
+	if !strings.Contains(ev.Reason, "7:05") || !strings.Contains(ev.Reason, "редактор") {
+		t.Fatalf("в утреннем поводе должны быть время и факт про редактор: %q", ev.Reason)
+	}
+	s.MarkSent(ev.Kind, day(7, 5))
+	// Обнуляет анти-спам перед вечером; в редакторе дистанция двойная (50 мин),
+	// потому отстояние — час.
+	s.MarkSent(KindSilence, day(17, 0))
+
+	// Вечер: смена части суток — тот же набор (время + редактор).
+	ev, ok = s.Tick(Inputs{
+		Now: day(18, 5), LastInput: day(18, 0), LastSay: day(17, 0),
+		HasFocus: true, Focus: focus.Snapshot{
+			Process: "code.exe", Kind: focus.KindCode, Label: "VS Code", Since: day(17, 0),
+		},
+	})
+	if !ok || ev.Kind != KindEvening {
+		t.Fatalf("вечерний ритуал обязан сработать: ok=%v ev=%+v", ok, ev)
+	}
+	if !strings.Contains(ev.Reason, "18:05") || !strings.Contains(ev.Reason, "редактор") {
+		t.Fatalf("в вечернем поводе должны быть время и факт про редактор: %q", ev.Reason)
 	}
 }
 

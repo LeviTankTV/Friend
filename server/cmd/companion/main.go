@@ -201,6 +201,7 @@ func run() error {
 	// решает, заговорить ли первой. Правила анти-спама и окна тишины — в
 	// internal/proactive; здесь только сбор входных данных и отправка.
 	sched := proactive.New(proactive.Config{
+		Enabled: cfg.Proactive.Enabled,
 		MinGap:        time.Duration(cfg.Proactive.MinGapMinutes) * time.Minute,
 		FoodReminder:  time.Duration(cfg.Proactive.FoodReminderMin) * time.Minute,
 		QuietFromHour: cfg.Proactive.QuietFromHour,

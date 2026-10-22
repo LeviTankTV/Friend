@@ -75,7 +75,21 @@ async function ensureServer() {
     console.error('[friend] не нашёл сервер. Собери его: cd server && go build -o ../bin/' + exe + ' ./cmd/companion');
     return false;
   }
-  serverProc = spawn(bin, ['-web', path.join(__dirname, '..', 'web'), '-addr', SERVER_ADDR], {
+  const args = ['-web', path.join(__dirname, '..', 'web'), '-addr', SERVER_ADDR];
+  if (SELFTEST) {
+    // Ночные ритуалы и прочие инициативы не должны попадать в середину
+    // самопроверки: проактивная реплика, прилетевшая во время проверки
+    // (облачко, TTS-генерация, махание рукой), сбивает замеры секций.
+    // Глушим планировщик ВРЕМЕННЫ конфигом — пользовательский настройки
+    // сохраняются: читаем его и поверх ставим proactive.enabled=false.
+    const userCfg = path.join(app.getPath('appData'), 'Friend', 'config.json');
+    const stCfg = path.join(app.getPath('temp'), 'friend-selftest-config.json');
+    let base = {};
+    try { base = JSON.parse(fs.readFileSync(userCfg, 'utf8')); } catch (_e) { /* конфига нет — дефолты сервера */ }
+    base.proactive = Object.assign({}, base.proactive || {}, { enabled: false });
+    try { fs.writeFileSync(stCfg, JSON.stringify(base)); args.push('-config', stCfg); } catch (_e) {}
+  }
+  serverProc = spawn(bin, args, {
     cwd: path.join(__dirname, '..'),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -2295,6 +2309,10 @@ async function runSelfTest() {
         off = m.state().dancing === false;
       }
       const avatarOff = !fa.avatar.dancing();
+      // Пауза до «голоса»: танец гаснет по тишине раньше, чем истекает
+      // LOUD_OFF_MS (8 с) контекста музыки. Голос обязан проверяться именно
+      // вне контекста — ждём с запасом после последнего громкого тика.
+      await t(2000);
       // Её голос вне музыки танец НЕ продлевает (баг «не перестаёт танцевать,
       // когда музыки уже нет»): 10 с «говорит» громко в тишине — танца нет.
       m.feedSelfSet(true);

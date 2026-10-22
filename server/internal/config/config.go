@@ -77,13 +77,16 @@ type LLM struct {
 	TimeoutSec      int     `json:"timeout_sec"`
 }
 
-// Proactive — планировщик (этап 4).
+// Proactive — планировщик (этап 4). Enabled=false — она никогда не
+// заговаривает первой (планировщик молчит); внутреннее состояние, реакция на
+// реплики и ответы на вопрос продолжают работать.
 type Proactive struct {
-	TickSeconds     int `json:"tick_seconds"`
-	MinGapMinutes   int `json:"min_gap_minutes"`
-	QuietFromHour   int `json:"quiet_from_hour"`
-	QuietToHour     int `json:"quiet_to_hour"`
-	FoodReminderMin int `json:"food_reminder_minutes"`
+	Enabled       bool `json:"enabled"`
+	TickSeconds   int  `json:"tick_seconds"`
+	MinGapMinutes int  `json:"min_gap_minutes"`
+	QuietFromHour int  `json:"quiet_from_hour"`
+	QuietToHour   int  `json:"quiet_to_hour"`
+	FoodReminderMin int  `json:"food_reminder_minutes"`
 }
 
 // Voice — озвучка реплик через Edge TTS (этап 7). Граница приватности:
@@ -151,6 +154,7 @@ func Default() Config {
 			TimeoutSec:      45,
 		},
 		Proactive: Proactive{
+			Enabled:         true,
 			TickSeconds:     30,
 			MinGapMinutes:   25,
 			QuietFromHour:   23,
