@@ -25,7 +25,7 @@ type Options struct {
 	SpritesDir string
 	// TTS — озвучка реплик (этап 7): по /tts?text=... отдаёт mp3 голоса.
 	// Nil — озвучки нет, и фронтенд её не просит.
-	TTS    TTSService
+	TTS TTSService
 	// STT — голосовой ввод (этап 7): по /stt принимает wav и возвращает текст.
 	// Nil — ввода нет, и микрофонная кнопка не показывается.
 	STT STTService
@@ -35,8 +35,8 @@ type Options struct {
 	// Wake — wake word (этап 7): слушает ли сервер её имя по /wake. Роут
 	// регистрируется только если функция включена И есть чем слушать (STT).
 	Wake bool
-	Log    *slog.Logger
-	Hub    *Hub
+	Log  *slog.Logger
+	Hub  *Hub
 }
 
 // TTSService — озвучивающая сторона (реализация — internal/tts.Service).

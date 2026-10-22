@@ -19,6 +19,7 @@ import (
 	"friend/internal/focus"
 	"friend/internal/llm"
 	"friend/internal/mood"
+	"friend/internal/moodread"
 	"friend/internal/state"
 )
 
@@ -56,7 +57,9 @@ const (
 // History отдаётся окну при подключении: пока сервер жив, разговор не должен
 // выглядеть начатым с нуля после перезагрузки страницы.
 type Responder interface {
-	Answer(ctx context.Context, text string) (string, error)
+	// userState — ярлык настроения человека по последним репликам
+	// (этап 9в, локальный детектор moodread; "" — нейтрально).
+	Answer(ctx context.Context, text, userState string) (string, error)
 	Ready() bool
 	Status() string
 	Timeout() time.Duration
@@ -96,6 +99,26 @@ type Hub struct {
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
+
+	// userState — ярлык настроения человека по последним репликам (этап 9в,
+	// локальный детектор moodread): «устал», «расстроился», «рад», «злится»,
+	// «тревожится» или "". Обновляется на КАЖДУЮ реплику (и без ключа тоже),
+	// живёт до следующей реплики. В память и наружу не уходит — это состояние
+	// текущей беседы.
+	userState string
+}
+
+// UserState — ярлык настроения человека по последним репликам ("" — нейтрально).
+func (h *Hub) UserState() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.userState
+}
+
+func (h *Hub) setUserState(s string) {
+	h.mu.Lock()
+	h.userState = s
+	h.mu.Unlock()
 }
 
 // MemoryStore — долгая память для хаба (реализация — internal/memory.Store).
@@ -123,10 +146,11 @@ func (h *Hub) SetSTT(v *STTInfo) { h.stt = v }
 func (h *Hub) SetWake(v *WakeInfo) { h.wake = v }
 
 // wakeRe — узнаёт её имя в расшифрованном сегменте. Две формы:
-//   • имя в начале фразы — по звучанию целиком («мира …»), и в виде, где
+//   - имя в начале фразы — по звучанию целиком («мира …»), и в виде, где
 //     whisper съедал последний гласный («мир …» — так он пишет и «мир», и
 //     «мира» одинаково, поэтому форма принята с оговоркой ниже);
-//   • имя сразу после запятой («привет, Мира!») — только полная форма «мира».
+//   - имя сразу после запятой («привет, Мира!») — только полная форма «мира».
+//
 // За именем не должно быть буквы: «мираж», «мирославная» — не имя.
 var wakeRe = regexp.MustCompile(`(?:^|,\s*)мир(?:а)?(?:[^а-яёa-яё]|$)`)
 
@@ -201,11 +225,12 @@ func WakeMention(text string) bool {
 
 // HandleWake — в речевом сегменте с /wake прозвучало её имя (wake word,
 // этап 7). Что происходит:
-//   • реплика человека — событие внутреннего состояния (как напечатанная);
-//   • окно получает WakeMsg: фронтенд будит её (если спит), она оживает и
+//   - реплика человека — событие внутреннего состояния (как напечатанная);
+//   - окно получает WakeMsg: фронтенд будит её (если спит), она оживает и
 //     коротко отвечает на имя;
-//   • сказанные ей слова идут в разговорную очередь как напечатанные —
+//   - сказанные ей слова идут в разговорную очередь как напечатанные —
 //     на «Мира, которое время?» она отвечает по сути, а не только кивком.
+//
 // Ключа нет — разговорная часть молчит, разбуживание всё равно работает.
 func (h *Hub) HandleWake(heard string) {
 	h.notifyUserTalk()
@@ -504,6 +529,9 @@ func (h *Hub) handleSay(c *wsClient, raw string) {
 	// Реплика человека — событие внутреннего состояния (этап 5) независимо от
 	// того, будет ли ответ: «он написал» происходит даже без ключа.
 	h.notifyUserTalk()
+	// Эмпатия (этап 9в): тон реплики читается локально и становится ярлыком
+	// текущей беседы («он устал») — для промпта и кадра ответа окну.
+	h.setUserState(moodread.Read(text))
 	// Ключа нет — говорим это сразу и текстом, который объясняет, что делать.
 	// Ставить такую реплику в очередь незачем: ответа не будет.
 	if h.responder == nil || !h.responder.Ready() {
@@ -657,7 +685,7 @@ func (c *wsClient) reply(text string) {
 	defer c.sendTo(ThinkingMsg{Type: TypeThinking, On: false})
 
 	start := time.Now()
-	answer, err := c.hub.responder.Answer(ctx, text)
+	answer, err := c.hub.responder.Answer(ctx, text, c.hub.UserState())
 	if err != nil {
 		if errors.Is(err, llm.ErrNoKey) {
 			// Не сбой, а состояние: человеку нужен текст про ключ, а не тревога.
@@ -670,7 +698,8 @@ func (c *wsClient) reply(text string) {
 		return
 	}
 	c.hub.log.Info("ответ", "ms", time.Since(start).Milliseconds(), "знаков", len([]rune(answer)))
-	c.sendTo(ReplyMsg{Type: TypeReply, Text: answer, At: time.Now().UTC()})
+	c.sendTo(ReplyMsg{Type: TypeReply, Text: answer, At: time.Now().UTC(),
+		UserState: c.hub.UserState()})
 }
 
 // replyTimeout — дедлайн на всю операцию: таймаут модели плюс запас.

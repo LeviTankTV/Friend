@@ -154,7 +154,7 @@ func Default() Config {
 			TickSeconds:     30,
 			MinGapMinutes:   25,
 			QuietFromHour:   23,
-			QuietToHour:   7,
+			QuietToHour:     7,
 			FoodReminderMin: 180,
 		},
 		Voice: Voice{

@@ -22,15 +22,17 @@ type fakeResponder struct {
 	delay  time.Duration
 	hist   []chat.Message
 
-	mu    sync.Mutex
-	asked []string
-	calls int
+	mu     sync.Mutex
+	asked  []string
+	states []string
+	calls  int
 }
 
-func (f *fakeResponder) Answer(ctx context.Context, text string) (string, error) {
+func (f *fakeResponder) Answer(ctx context.Context, text, userState string) (string, error) {
 	f.mu.Lock()
 	f.calls++
 	f.asked = append(f.asked, text)
+	f.states = append(f.states, userState)
 	f.mu.Unlock()
 	if f.delay > 0 {
 		select {
@@ -58,6 +60,12 @@ func (f *fakeResponder) askedTexts() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.asked...)
+}
+
+func (f *fakeResponder) askedStates() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.states...)
 }
 
 func (f *fakeResponder) callCount() int {
@@ -97,6 +105,45 @@ func TestSayGetsThinkingThenReply(t *testing.T) {
 	}
 	if got := resp.askedTexts(); len(got) != 1 || got[0] != "привет" {
 		t.Errorf("к компаньону ушло %v", got)
+	}
+}
+
+// Эмпатия (этап 9в): тон реплики читается локально и доходит до компаньона
+// вторым аргументом Answer, а в кадре ответа приезжает окну полем
+// user_state. Нейтральная реплика — ярлыка нет.
+func TestSayCarriesUserState(t *testing.T) {
+	resp := &fakeResponder{ready: true, answer: "Понимаю тебя."}
+	srv, _, hub := newTestServerWith(t, resp)
+	conn := dial(t, srv)
+	send(t, conn, Incoming{Type: TypeHello, Client: "test", Version: protocolVersion})
+	_ = recv(t, conn)
+
+	send(t, conn, map[string]any{"type": TypeSay, "text": "мне грустно..."})
+	for {
+		f := recv(t, conn)
+		if f["type"] == TypeReply {
+			if f["user_state"] != "расстроился" {
+				t.Fatalf("кадр ответа без ярлыка тона: %v", f)
+			}
+			break
+		}
+	}
+	if got := resp.askedStates(); len(got) != 1 || got[0] != "расстроился" {
+		t.Errorf("компаньону ушло состояние %v, ожидался «расстроился»", got)
+	}
+	if hub.UserState() != "расстроился" {
+		t.Errorf("ярлык живёт до следующей реплики, получили %q", hub.UserState())
+	}
+
+	send(t, conn, map[string]any{"type": TypeSay, "text": "открой файл"})
+	for {
+		f := recv(t, conn)
+		if f["type"] == TypeReply {
+			break
+		}
+	}
+	if hub.UserState() != "" {
+		t.Errorf("нейтральная реплика обязана сбрасывать ярлык, получили %q", hub.UserState())
 	}
 }
 

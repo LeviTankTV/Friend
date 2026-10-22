@@ -22,7 +22,10 @@ func wav16kMono(t *testing.T, path string, seconds int) {
 	data := make([]byte, 44+2*16000*seconds)
 	copy(data, []byte("RIFF"))
 	be32 := func(off int, v int) {
-		data[off] = byte(v); data[off+1] = byte(v >> 8); data[off+2] = byte(v >> 16); data[off+3] = byte(v >> 24)
+		data[off] = byte(v)
+		data[off+1] = byte(v >> 8)
+		data[off+2] = byte(v >> 16)
+		data[off+3] = byte(v >> 24)
 	}
 	be32(4, len(data)-8)
 	copy(data[8:], []byte("WAVEfmt "))

@@ -132,7 +132,10 @@ func TestIgnored(t *testing.T) {
 }
 
 func TestBand(t *testing.T) {
-	cases := []struct{ mood float64; want string }{
+	cases := []struct {
+		mood float64
+		want string
+	}{
 		{0.9, "high"}, {0.7, "high"}, {0.5, "mid"}, {0.36, "mid"}, {0.2, "low"},
 	}
 	for _, c := range cases {

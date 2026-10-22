@@ -722,6 +722,10 @@ window.FriendAvatar = (function () {
       // таймер до следующего (только в бодром простое).
       fidget: null,
       fidgetIn: 25 + Math.random() * 40,
+      // Эмпатия (этап 9в): лицо-реакция на состояние человека
+      // {face, applied, until}: применяется, когда она договорила ответ,
+      // и гаснет через несколько секунд — сочувствие, а не маска.
+      userReact: null,
     };
 
     function showEyes(kind) {
@@ -1156,7 +1160,24 @@ window.FriendAvatar = (function () {
       // спокойное: постоянная улыбка — это уже не эмоция, а маска.
       if (anim.happyUntil > 0 && anim.t > anim.happyUntil && anim.petStream <= 0 && anim.talkUntil < anim.t) {
         anim.happyUntil = 0;
-        if (anim.emotion === 'happy') setEmotion('calm');
+        if (anim.emotion === 'happy') setEmotion(calmFace());
+      }
+
+      // Эмпатия (этап 9в): лицо-реакция на состояние человека. Применяется,
+      // когда она договорила ответ (не перебивает речь), держится несколько
+      // секунд и возвращается к «лицу покоя» полоски настроения.
+      if (anim.userReact) {
+        if (anim.asleep) {
+          anim.userReact = null;   // сон не перекрашивают
+        } else if (!anim.userReact.applied && anim.talkUntil < anim.t &&
+                   anim.petStream <= 0) {
+          anim.userReact.applied = true;
+          anim.userReact.until = anim.t + 6;
+          setEmotion(anim.userReact.face);
+        } else if (anim.userReact.applied && anim.t >= anim.userReact.until) {
+          anim.userReact = null;
+          if (anim.talkUntil < anim.t && anim.petStream <= 0) setEmotion(calmFace());
+        }
       }
 
       // Зрачки: плавно к цели.
@@ -1450,6 +1471,19 @@ window.FriendAvatar = (function () {
       },
       dancing: function () { return anim.dance; },
       pet: pet,
+      // reactToUserState (этап 9в): ярлык тона сообщений человека
+      // («расстроился», «устал», «рад», «злится», «тревожится») — лицо
+      // сочувствия после её ответа. Ярлык приходит с сервера (локальный
+      // детектор internal/moodread), содержимое сообщений аватар не читает.
+      reactToUserState: function (label) {
+        const faces = {
+          'расстроился': 'sad', 'устал': 'think', 'тревожится': 'think',
+          'злится': 'calm', 'рад': 'happy',
+        };
+        const f = faces[label];
+        if (!f) return;
+        anim.userReact = { face: f, applied: false, until: anim.t + 12 };
+      },
       // Сколько сердечек сейчас летит — нужно самопроверке: глазами эффект
       // успевает растаять между двумя взглядами на окно.
       hearts: function () { return hearts.length; },

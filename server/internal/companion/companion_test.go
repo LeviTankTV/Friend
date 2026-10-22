@@ -61,7 +61,7 @@ func TestAnswerBuildsRequest(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "Привет. Я тебя с утра не видела."}
 	c := New(testProfile(t), m, chat.New(10))
 
-	got, err := c.Answer(context.Background(), "привет")
+	got, err := c.Answer(context.Background(), "привет", "")
 	if err != nil {
 		t.Fatalf("Answer вернул ошибку: %v", err)
 	}
@@ -92,11 +92,11 @@ func TestHistoryGoesToModel(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "первый ответ"}
 	c := New(testProfile(t), m, chat.New(10))
 
-	if _, err := c.Answer(context.Background(), "как дела?"); err != nil {
+	if _, err := c.Answer(context.Background(), "как дела?", ""); err != nil {
 		t.Fatal(err)
 	}
 	m.answer = "второй ответ"
-	if _, err := c.Answer(context.Background(), "а ты?"); err != nil {
+	if _, err := c.Answer(context.Background(), "а ты?", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func TestWithoutKeyNoRequest(t *testing.T) {
 	m := &fakeModel{ready: false}
 	c := New(testProfile(t), m, chat.New(10))
 
-	_, err := c.Answer(context.Background(), "привет")
+	_, err := c.Answer(context.Background(), "привет", "")
 	if !errors.Is(err, llm.ErrNoKey) {
 		t.Fatalf("ожидалась ErrNoKey, получено %v", err)
 	}
@@ -144,7 +144,7 @@ func TestFailureDoesNotAddAssistantTurn(t *testing.T) {
 	m := &fakeModel{ready: true, err: errors.New("NIM недоступен")}
 	c := New(testProfile(t), m, chat.New(10))
 
-	if _, err := c.Answer(context.Background(), "ты тут?"); err == nil {
+	if _, err := c.Answer(context.Background(), "ты тут?", ""); err == nil {
 		t.Fatal("ошибка модели не дошла до вызывающей стороны")
 	}
 	hist := c.History()
@@ -161,7 +161,7 @@ func TestEmptyTextIsRejected(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "не важно"}
 	c := New(testProfile(t), m, chat.New(10))
 
-	if _, err := c.Answer(context.Background(), "   \n  "); err == nil {
+	if _, err := c.Answer(context.Background(), "   \n  ", ""); err == nil {
 		t.Fatal("пустая реплика не дала ошибки")
 	}
 	if m.calls != 0 || len(c.History()) != 0 {
@@ -175,7 +175,7 @@ func TestWhitespaceAnswerIsEmptyReply(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "   "}
 	c := New(testProfile(t), m, chat.New(10))
 
-	_, err := c.Answer(context.Background(), "привет")
+	_, err := c.Answer(context.Background(), "привет", "")
 	if !errors.Is(err, llm.ErrEmptyReply) {
 		t.Fatalf("ожидалась ErrEmptyReply, получено %v", err)
 	}
@@ -187,7 +187,7 @@ func TestTrimmedTextGoesToHistory(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "ага"}
 	c := New(testProfile(t), m, chat.New(10))
 
-	if _, err := c.Answer(context.Background(), "\n  привет  \n"); err != nil {
+	if _, err := c.Answer(context.Background(), "\n  привет  \n", ""); err != nil {
 		t.Fatal(err)
 	}
 	if c.History()[0].Text != "привет" {
@@ -202,7 +202,7 @@ func TestRememberAddsAssistantTurn(t *testing.T) {
 	c := New(testProfile(t), m, chat.New(10))
 
 	c.Remember("Ты давно не вставал.")
-	if _, err := c.Answer(context.Background(), "знаю"); err != nil {
+	if _, err := c.Answer(context.Background(), "знаю", ""); err != nil {
 		t.Fatal(err)
 	}
 	msgs := m.got[0]
@@ -220,7 +220,7 @@ func TestContextDeadlineReachesModel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if _, err := c.Answer(ctx, "привет"); err == nil {
+	if _, err := c.Answer(ctx, "привет", ""); err == nil {
 		t.Fatal("молчащая модель не дала ошибки")
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
@@ -236,7 +236,7 @@ func TestContextGoesToSystemPrompt(t *testing.T) {
 	c.SetContext(func() string {
 		return "Он сейчас в GoLand (IDE для Go), уже 2 ч 10 мин."
 	})
-	if _, err := c.Answer(context.Background(), "тихий вечер"); err != nil {
+	if _, err := c.Answer(context.Background(), "тихий вечер", ""); err != nil {
 		t.Fatal(err)
 	}
 	system := m.got[0][0].Content
@@ -253,7 +253,7 @@ func TestContextGoesToSystemPrompt(t *testing.T) {
 func TestNoContextNoMarker(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "Привет."}
 	c := New(testProfile(t), m, chat.New(10))
-	if _, err := c.Answer(context.Background(), "привет"); err != nil {
+	if _, err := c.Answer(context.Background(), "привет", ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(m.got[0][0].Content, "Обстановка") {
@@ -261,7 +261,7 @@ func TestNoContextNoMarker(t *testing.T) {
 	}
 	c.SetContext(func() string { return "" })
 	m.got = nil
-	if _, err := c.Answer(context.Background(), "ещё раз"); err != nil {
+	if _, err := c.Answer(context.Background(), "ещё раз", ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(m.got[0][0].Content, "Обстановка") {
@@ -353,7 +353,7 @@ func TestMemoryFactsGoToSystemPrompt(t *testing.T) {
 	}
 	c := New(testProfile(t), m, chat.New(10))
 	c.SetMemory(mem)
-	if _, err := c.Answer(context.Background(), "как там отец?"); err != nil {
+	if _, err := c.Answer(context.Background(), "как там отец?", ""); err != nil {
 		t.Fatal(err)
 	}
 	system := m.got[0][0].Content
@@ -381,7 +381,7 @@ func TestAnswerArchivesBothTurns(t *testing.T) {
 	mem := &fakeMemory{}
 	c := New(testProfile(t), m, chat.New(10))
 	c.SetMemory(mem)
-	if _, err := c.Answer(context.Background(), "привет"); err != nil {
+	if _, err := c.Answer(context.Background(), "привет", ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(mem.archived) != 2 || mem.archived[0].Role != chat.RoleUser ||
@@ -408,12 +408,12 @@ func TestSpeakArchivesAnswer(t *testing.T) {
 func TestMemoryFailureDoesNotBreakAnswer(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "хорошо"}
 	c := New(testProfile(t), m, chat.New(10))
-	if _, err := c.Answer(context.Background(), "привет"); err != nil {
+	if _, err := c.Answer(context.Background(), "привет", ""); err != nil {
 		t.Fatal(err)
 	} // без SetMemory — чисто
 	c2 := New(testProfile(t), m, chat.New(10))
 	c2.SetMemory(&fakeMemory{recallErr: errors.New("файл занят")})
-	if _, err := c2.Answer(context.Background(), "привет"); err != nil {
+	if _, err := c2.Answer(context.Background(), "привет", ""); err != nil {
 		t.Fatalf("ошибка памяти не должна ломать ответ: %v", err)
 	}
 	if strings.Contains(m.got[len(m.got)-1][0].Content, "Что ты помнишь") {
@@ -466,7 +466,7 @@ func TestMoodLineInSystemPrompt(t *testing.T) {
 	c.SetMoodSource(func() mood.State {
 		return mood.State{Mood: 0.85, Energy: 0.2, Affection: 0.9}
 	})
-	if _, err := c.Answer(context.Background(), "привет"); err != nil {
+	if _, err := c.Answer(context.Background(), "привет", ""); err != nil {
 		t.Fatal(err)
 	}
 	sys := m.got[len(m.got)-1][0].Content
@@ -505,7 +505,7 @@ func TestMoodLineInSpeakPrompt(t *testing.T) {
 func TestNoMoodSourceNoLine(t *testing.T) {
 	m := &fakeModel{ready: true, answer: "ага"}
 	c := New(testProfile(t), m, chat.New(10))
-	if _, err := c.Answer(context.Background(), "привет"); err != nil {
+	if _, err := c.Answer(context.Background(), "привет", ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(m.got[len(m.got)-1][0].Content, "внутреннее состояние") {

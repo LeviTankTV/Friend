@@ -21,9 +21,9 @@ import (
 
 // State — снимок состояния. Все значения в диапазоне 0..1.
 type State struct {
-	Mood      float64   `json:"mood"`
-	Energy    float64   `json:"energy"`
-	Affection float64   `json:"affection"`
+	Mood      float64 `json:"mood"`
+	Energy    float64 `json:"energy"`
+	Affection float64 `json:"affection"`
 	// LastUser — когда человек последний раз с ней говорил. Молчание
 	// считается именно по нему: её собственные проактивные реплики молчание
 	// не прерывают (иначе «она сама написала» занижало бы счёт игнорирования).
@@ -36,15 +36,15 @@ type State struct {
 // Параметры модели. Все скорости — в единицах за ЧАС: состояние должно быть
 // заметным за вечер, но не должно перещёлкиваться от одного сообщения.
 const (
-	userAffectionGain    = 0.04  // привязанность за одно сообщение
-	ignoredMoodLoss      = 0.15  // настроение за проигнорированную реплику
-	ignoredAffectionLoss = 0.02  // привязанность за игнор (вдвое слабее, с полом)
+	userAffectionGain    = 0.04 // привязанность за одно сообщение
+	ignoredMoodLoss      = 0.15 // настроение за проигнорированную реплику
+	ignoredAffectionLoss = 0.02 // привязанность за игнор (вдвое слабее, с полом)
 	ignoredAfter         = 30 * time.Minute
 
-	recentContact  = 30 * time.Minute
-	longSilence    = 4 * time.Hour
-	moodCeiling    = 0.80
-	moodFloor      = 0.25
+	recentContact   = 30 * time.Minute
+	longSilence     = 4 * time.Hour
+	moodCeiling     = 0.80
+	moodFloor       = 0.25
 	moodContactRate = 0.04 // к потолку после свежего контакта
 	moodSilenceRate = 0.02 // к полу после долгого молчания
 

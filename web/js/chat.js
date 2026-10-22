@@ -336,6 +336,11 @@ window.FriendChat = (function () {
         // должно вернуться не к «calm», а к сну.
         const emotion = msg && msg.emotion;
         if (emotion === 'sleep' && avatar) avatar.setEmotion('sleep');
+        // Эмпатия (этап 9в): сервер присылает ярлык тона его сообщений
+        // («расстроился», «устал», «рад»…) — лицо сочувствия применится,
+        // когда она договорила. Пусто — нейтрально, не трогаем.
+        const us = msg && msg.user_state;
+        if (us && avatar && avatar.reactToUserState) avatar.reactToUserState(us);
         // Через несколько секунд лицо снова спокойное: постоянная улыбка — это
         // уже не эмоция, а маска. Спящую не будим: она остаётся с закрытыми
         // глазами, пока её не разбудит набор текста (setThinking).

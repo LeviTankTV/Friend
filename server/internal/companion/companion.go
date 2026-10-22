@@ -52,6 +52,11 @@ type Companion struct {
 	// энергии/привязанности в системный промпт. Nil — состояние не участвует
 	// в промпте (тесты, сборка без цикла состояния).
 	mood func() mood.State
+	// userState — ярлык тона реплик человека на время ОДНОГО ответа
+	// (этап 9в): «устал», «расстроился», «рад», «злится», «тревожится».
+	// Краткий, живёт одну реплику — поэтому мьютекс не нужен (Answer
+	// сериализован chatLoop'ом хаба), но поле отделено от истории.
+	userState string
 }
 
 // Memory — долгая память (internal/memory). Компаньону нужны три операции:
@@ -172,7 +177,11 @@ func (c *Companion) Speak(ctx context.Context, reason string) (string, error) {
 //     человеком — это честнее, чем пустая реплика ассистента;
 //   - ключ проверяется здесь же, до запроса: без ключа не должно быть ни
 //     «думает» на минуту, ни лишней задержки — только понятный текст.
-func (c *Companion) Answer(ctx context.Context, text string) (string, error) {
+//
+// userState (этап 9в) — ярлык тона реплик человека («устал», «расстроился»,
+// «рад», «злится», «тревожится», "" — нейтрально): в историю НЕ попадает
+// (это не его слова), живёт одной репликой: в промпт идёт «он сейчас: …».
+func (c *Companion) Answer(ctx context.Context, text, userState string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", ErrEmptyReply
@@ -183,7 +192,9 @@ func (c *Companion) Answer(ctx context.Context, text string) (string, error) {
 
 	c.sess.Add(chat.RoleUser, text)
 	c.archive(chat.RoleUser, text)
+	c.userState = strings.TrimSpace(userState)
 	answer, err := c.model.Chat(ctx, c.messages())
+	c.userState = ""
 	if err != nil {
 		return "", err
 	}
@@ -231,6 +242,13 @@ func (c *Companion) messagesWithQuery(query string) []llm.Message {
 		if line := mood.Describe(c.mood()); line != "" {
 			prompt += "\n\n" + line
 		}
+	}
+	// Эмпатия (этап 9в): ярлык тона реплик человека — одна строка промпта.
+	// Формулировка обязана быть такой, чтобы она ЧУВСТВОВАЛА состояние, а не
+	// допрашивала: «он устал» ≠ «спроси, почему он устал».
+	if s := strings.TrimSpace(c.userState); s != "" {
+		prompt += "\n\nОн сейчас: " + s +
+			" (это твоё собственное наблюдение по тону его сообщений — учти это в тоне ответа; не переспрашивай и не объявляй человеку, что ты его «проанализировала»)."
 	}
 	if query != "" {
 		prompt += c.memorySection(query)

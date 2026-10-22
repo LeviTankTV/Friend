@@ -33,12 +33,12 @@ import (
 // Service озвучивает текст в mp3. Нулевой Service (edge-tts не найден)
 // честно говорит «недоступен» и не пытается генерировать.
 type Service struct {
-	mu     sync.Mutex
-	edge   string // путь к CLI edge-tts; пусто = не установлен
-	voice  string
-	speed  string
-	cache  string
-	log    *slog.Logger
+	mu    sync.Mutex
+	edge  string // путь к CLI edge-tts; пусто = не установлен
+	voice string
+	speed string
+	cache string
+	log   *slog.Logger
 }
 
 // New собирает службу. enabled=false или отсутствие edge-tts в PATH —

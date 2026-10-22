@@ -2497,6 +2497,59 @@ async function runSelfTest() {
   }
   fidgetPart = fidgetPart || { ok: false, why: 'нет ответа' };
 
+  // Двадцать шестая часть: эмпатия по тону (этап 9в). Сначала механизм страницы:
+  // ярлык тона → лицо сочувствия после речи → возврат к спокойному. Потом живая
+  // цепочка: грустная реплика → сервер отвечает с меткой «расстроился» → лицо
+  // действительно меняется; нейтральная реплика → метки нет, лицо не трогается.
+  // Без живого ключа цепочка не спросится: сервер честно вернёт reply_error,
+  // и проверка сойдёт на механизм страницы (как разговор меряет любой ответ).
+  let empathyPart = null;
+  try {
+    empathyPart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      const av = fa.avatar;
+      if (!av.reactToUserState) return { ok: false, why: 'нет API эмпатии' };
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      // Механизм: лицо сочувствия применится после речи, через ~6 с вернётся.
+      av.setEmotion(av.calmFace());
+      av.reactToUserState('расстроился');
+      let sawSad = false;
+      for (let k = 0; k < 20 && !sawSad; k++) { await t(150); sawSad = av.emotion() === 'sad'; }
+      let backCalm = false;
+      for (let k = 0; k < 70 && !backCalm; k++) { await t(150); backCalm = av.emotion() === av.calmFace(); }
+      // Живая цепочка через настоящий канал.
+      const box = { reply: null, err: null };
+      fa.net.on('reply', (m) => { if (!box.reply) box.reply = m; });
+      fa.net.on('reply_error', (m) => { if (!box.err) box.err = m; });
+      const chain = { key: false, state: '', sadFace: false, neutralState: 'нет ответа' };
+      fa.net.send({ type: 'say', text: 'мне сегодня очень грустно и тоскливо' });
+      for (let k = 0; k < 120 && !box.reply && !box.err; k++) await t(500);
+      if (box.err) {
+        chain.key = true;
+      } else if (box.reply) {
+        chain.state = box.reply.user_state || '';
+        for (let k = 0; k < 60 && !chain.sadFace; k++) { await t(500); chain.sadFace = av.emotion() === 'sad'; }
+        box.reply = null; box.err = null;
+        fa.net.send({ type: 'say', text: 'открой файл readme' });
+        for (let k = 0; k < 120 && !box.reply && !box.err; k++) await t(500);
+        chain.neutralState = box.reply ? (box.reply.user_state || '') : '';
+      }
+      av.setEmotion(av.calmFace());
+      const live = chain.key || (chain.state === 'расстроился' && chain.sadFace && chain.neutralState === '');
+      return {
+        ok: sawSad && backCalm && live,
+        why: 'механизм ' + (sawSad && backCalm) + ' (грусть ' + sawSad + ' возврат ' + backCalm + ')' +
+          (chain.key ? ', цепочка пропущена (нет ключа)' :
+            ': метка «' + chain.state + '» лицо ' + chain.sadFace + ', нейтральная «' + chain.neutralState + '»'),
+      };
+    })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
+    console.log('[friend] selftest: эмпатия — ' +
+      (empathyPart.ok ? 'OK (' + empathyPart.why + ')' : 'ОШИБКА (' + empathyPart.why + ')'));
+  } catch (err) {
+    console.error('[friend] selftest: эмпатия не проверилась:', err.message);
+  }
+  empathyPart = empathyPart || { ok: false, why: 'нет ответа' };
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
@@ -2520,7 +2573,7 @@ async function runSelfTest() {
 
   console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------
