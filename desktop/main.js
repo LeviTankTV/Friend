@@ -2438,6 +2438,59 @@ async function runSelfTest() {
       (routePart.ok ? 'OK (' + routePart.why + ')' : 'ОШИБКА (' + routePart.why + ')'));
   }
 
+  // Двадцать пятая часть: «микроживость» (этап 9а, avatar.js). Движения
+  // проверяем руками и_debug_ом аватара: потягивание показывается обеими
+  // поднятыми руками и наклоном; после конца — руки опущены, наклон нулевой;
+  // сон блокирует автозапуск, бодрствование — нет.
+  let fidgetPart = null;
+  try {
+    fidgetPart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      const av = fa.avatar;
+      if (!av.fidgetState) return { ok: false, why: 'нет API микроживости' };
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      // Потягивание: обе поднятые руки, обе опущенные скрыты, наклон талии.
+      // Ждём пару кадров: трансформы применяет update(), а не startFidget.
+      av.fidget('stretch');
+      await t(150);
+      const mid = av.fidgetDebug();
+      const stMid = mid.kind === 'stretch' && mid.armUp && mid.armUpL &&
+        !mid.armR && !mid.armL && Math.abs(mid.rot) > 0.002;
+      let ended = false;
+      for (let k = 0; k < 60 && !ended; k++) { await t(100); ended = av.fidgetState() === null; }
+      const rest = av.fidgetDebug();
+      const stRest = rest.kind === null && rest.armR && rest.armL &&
+        !rest.armUp && !rest.armUpL && Math.abs(rest.rot) < 0.0005;
+      // Ёрзание: наклон качается во время, потом ноль.
+      av.fidget('squirm');
+      await t(250);
+      const sq = av.fidgetDebug();
+      const stSq = sq.kind === 'squirm' && (Math.abs(sq.rot) > 0.002 || Math.abs(sq.armRotL) > 0.002);
+      for (let k = 0; k < 40 && av.fidgetState(); k++) await t(100);
+      // Автозапуск: спящую не будит, бодрствующую — запускает.
+      av.setEmotion('sleep');
+      av.fidgetArm(0.1);
+      await t(1300);
+      const stSleep = av.fidgetState() === null;
+      av.setEmotion('calm');
+      av.fidgetArm(0.1);
+      let fired = false;
+      for (let k = 0; k < 20 && !fired; k++) { await t(100); fired = av.fidgetState() !== null; }
+      // В конце проверки — на спокойное лицо.
+      av.setEmotion(av.calmFace());
+      return {
+        ok: stMid && ended && stRest && stSq && stSleep && fired,
+        why: 'потя ' + stMid + ' конец ' + ended + ' покой ' + stRest +
+          ', ёрз ' + stSq + ', сон блокирует ' + stSleep + ', авто ' + fired,
+      };
+    })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
+    console.log('[friend] selftest: микроживость — ' +
+      (fidgetPart.ok ? 'OK (' + fidgetPart.why + ')' : 'ОШИБКА (' + fidgetPart.why + ')'));
+  } catch (err) {
+    console.error('[friend] selftest: микроживость не проверилась:', err.message);
+  }
+  fidgetPart = fidgetPart || { ok: false, why: 'нет ответа' };
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
@@ -2461,7 +2514,7 @@ async function runSelfTest() {
 
   console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------

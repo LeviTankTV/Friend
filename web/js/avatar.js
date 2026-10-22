@@ -588,6 +588,17 @@ window.FriendAvatar = (function () {
     armUpWrap.visible = false;
     sprite.addChild(armUpWrap);
 
+    // Зеркальная поднятая левая рука (для потягивания): сетка та же,
+    // отражённая; плечо — правый нижний угол, поэтому сдвиг внутрь на
+    // (−11, −21), и вращение идёт вокруг левого плеча (13,28).
+    const armUpLeftWrap = new PIXI.Container();
+    armUpLeftWrap.position.set(13 * PIX, 28 * PIX);
+    const armUpLeft = paint(PIXI, flipX(armUpGrid()), PIX);
+    armUpLeft.position.set(-11 * PIX, -21 * PIX);
+    armUpLeftWrap.addChild(armUpLeft);
+    armUpLeftWrap.visible = false;
+    sprite.addChild(armUpLeftWrap);
+
     // --- лицо: глаза, брови, рот, румянец --------------------------------
     function facePart(gfx, gx, gy) {
       const holder = new PIXI.Container();
@@ -707,6 +718,10 @@ window.FriendAvatar = (function () {
       dance: false,
       danceW: 6.3,
       danceT: 0,
+      // Микроживость (этап 9а): текущее микродвижение {kind, t, dur} и
+      // таймер до следующего (только в бодром простое).
+      fidget: null,
+      fidgetIn: 25 + Math.random() * 40,
     };
 
     function showEyes(kind) {
@@ -821,6 +836,52 @@ window.FriendAvatar = (function () {
       if (sheet) { syncSheetFrame(true); return; }   // лист: кадр «машет рукой»
       armUpWrap.visible = true;
       armR.visible = false;
+    }
+
+    // --- микроживость (этап 9а) --------------------------------------------
+    // В бодром простое она не «статуя»: иногда потянется, почешет затылок,
+    // ёрзнет на месте, посмотрит на свою ладошку. Движения маленькие и
+    // идут по синусной огибающей (0→1→0): начало и конец плавные, без
+    // «включил анимацию». Речь, драг, танец, шаг и сон перекрывают
+    // микроживость; в режиме листа её нет — там кадры выбирает лист.
+    const FIDGETS = {
+      stretch: { dur: 2.6, p: 0.30 },   // потягивается: обе руки вверх
+      scratch: { dur: 2.0, p: 0.25 },   // чешет затылок
+      squirm: { dur: 1.1, p: 0.25 },    // ёрзает
+      palm: { dur: 2.4, p: 0.20 },      // смотрит на ладошку
+    };
+    const PIVX = 20 * PIX, PIVY = 40 * PIX;   // ось наклона — талия
+
+    // pivotRotate — наклон ВСЕГО спрайта вокруг талии: контейнер стоит в
+    // (-20,-28) и вращается вокруг своего левого верхнего угла, поэтому
+    // положение компенсируется поворотом точки крепления.
+    function pivotRotate(theta) {
+      const dx = -SPRITE_W / 2 - PIVX, dy = -SPRITE_H / 2 - PIVY;
+      const c = Math.cos(theta), s = Math.sin(theta);
+      sprite.rotation = theta;
+      sprite.position.set(PIVX + dx * c - dy * s, PIVY + dx * s + dy * c);
+    }
+
+    function startFidget(kind) {
+      if (!FIDGETS[kind]) return null;
+      anim.fidget = { kind: kind, t: 0, dur: FIDGETS[kind].dur };
+      if (kind === 'stretch') {
+        armUpWrap.visible = true; armR.visible = false;
+        armUpLeftWrap.visible = true; armL.visible = false;
+      } else if (kind === 'scratch' || kind === 'palm') {
+        armUpWrap.visible = true; armR.visible = false;
+      }
+      return kind;
+    }
+
+    function endFidget() {
+      anim.fidget = null;
+      armUpWrap.visible = false; armUpWrap.rotation = 0;
+      armUpLeftWrap.visible = false;
+      armL.visible = true; armR.visible = true;
+      armL.rotation = 0; armR.rotation = 0;
+      pivotRotate(0);
+      anim.lookX = 0; anim.lookY = 0;
     }
 
     // spawnHeart — одно сердечко, улетающее от головы. Плавно тает: резкое
@@ -988,6 +1049,48 @@ window.FriendAvatar = (function () {
           armR.visible = true;
           armUpWrap.rotation = 0;
         }
+      }
+
+      // Микроживость: в бодром простое — случайные микродвижения
+      // (потянуться, почесать затылок, ёрзнуть, посмотреть на ладошку).
+      // Речь, шаг, танец, взмах и сон её обрывают, в режиме листа её нет.
+      if (anim.fidget &&
+          (sheet || anim.asleep || anim.walking !== 0 || anim.dance || anim.waving > 0)) {
+        endFidget();
+      }
+      if (!anim.fidget && !sheet && !anim.asleep && anim.walking === 0 &&
+          !anim.dance && anim.waving <= 0 && anim.talkUntil < anim.t) {
+        anim.fidgetIn -= dt;
+        if (anim.fidgetIn <= 0) {
+          const r = Math.random();
+          const kind = r < 0.30 ? 'stretch' : r < 0.55 ? 'scratch' :
+            r < 0.80 ? 'squirm' : 'palm';
+          startFidget(kind);
+          anim.fidgetIn = 30 + Math.random() * 60;
+        }
+      }
+      if (anim.fidget) {
+        const f = anim.fidget;
+        f.t += dt;
+        const e = Math.sin(Math.PI * Math.min(1, f.t / f.dur));   // 0→1→0
+        if (f.kind === 'stretch') {
+          pivotRotate(-0.05 * e);
+          armUpWrap.rotation = -0.38 * e;
+          armUpLeftWrap.rotation = 0.38 * e;
+        } else if (f.kind === 'scratch') {
+          pivotRotate(0.06 * e);
+          armUpWrap.rotation = -0.55 * e;
+        } else if (f.kind === 'squirm') {
+          const w = Math.sin(f.t * 16) * 0.04 * e;
+          pivotRotate(w);
+          armL.rotation = -w; armR.rotation = w;
+        } else {   // palm
+          pivotRotate(0.10 * e);
+          armUpWrap.rotation = -0.78 * e;
+          anim.lookX = -0.7 * PIX * e;
+          anim.lookY = -0.55 * PIX * e;
+        }
+        if (f.t >= f.dur) endFidget();
       }
 
       // Сердечки: поднимаются, покачиваются и тают.
@@ -1313,6 +1416,24 @@ window.FriendAvatar = (function () {
       walking: function () { return anim.walking; },
       say: say,
       wave: wave,
+      // Микроживость (этап 9а): fidget — запустить движение руками
+      // (для самопроверки), fidgetState — текущее ('stretch'|'scratch'|
+      // 'squirm'|'palm'|null), fidgetDebug — видимость рук и наклон для
+      // пиксельной проверки, fidgetArm — подставить таймер автозапуска.
+      fidget: function (kind) { return startFidget(kind); },
+      fidgetState: function () { return anim.fidget ? anim.fidget.kind : null; },
+      fidgetArm: function (sec) { anim.fidgetIn = Number(sec) || 0; },
+      fidgetDebug: function () {
+        return {
+          kind: anim.fidget ? anim.fidget.kind : null,
+          armUp: armUpWrap.visible,
+          armUpL: armUpLeftWrap.visible,
+          armL: armL.visible,
+          armR: armR.visible,
+          rot: Math.round(sprite.rotation * 1000) / 1000,
+          armRotL: Math.round(armL.rotation * 1000) / 1000,
+        };
+      },
       // setDance — танец под музыку: вкл/выкл и частота подскока из
       // измеренного детектором темпа (рад/с, в узких пределах: медленный
       // «плывёт», быстрый «трясёт»). dancing — состояние для самопроверки.
