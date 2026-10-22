@@ -1,0 +1,246 @@
+// Package persona — характер компаньона: кто она, как говорит, что любит.
+//
+// Личность живёт ОТДЕЛЬНЫМ файлом (mira.json), а не строкой в коде: характер —
+// это то, что пользователь правит под себя, а не то, что программист
+// пересобирает. Файл по умолчанию встроен в бинарник (go:embed), поэтому
+// собранный сервер работает и без него рядом; свой файл можно положить на диск
+// и указать в конфиге (persona.file) — тогда он ПЕРЕКРЫВАЕТ встроенный целиком.
+//
+// Системный промпт НЕ хранится в файле. Файл отвечает на вопрос «кто она»,
+// а сборка промпта (время суток, примеры речи, запреты) — задача кода: иначе
+// правка формата промпта требовала бы правки характера у каждого пользователя.
+package persona
+
+import (
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+//go:embed mira.json
+var embeddedDefault []byte
+
+// Example — пример речи: как она отвечает в похожей ситуации. Показывается
+// модели прямо в системном промпте: примеры держат тон лучше, чем описание тона.
+type Example struct {
+	User  string `json:"user"`
+	Reply string `json:"reply"`
+}
+
+// Profile — характер целиком. Все поля, кроме Name, необязательные: файл
+// характера пишет человек, и он не обязан заполнять всё.
+type Profile struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+	// Gender решает род речи о себе («я пришла» или «я пришёл»). Это не
+	// украшение: русский язык выдаёт ошибку рода сразу, а модель, которой пол
+	// не назван, выбирает род случайно и меняет его посреди разговора.
+	Gender   string    `json:"gender"` // female | male (пусто — не уточняется)
+	Tone     string    `json:"tone"`
+	Language string    `json:"language"`
+	Style    []string  `json:"style"`
+	Habits   []string  `json:"habits"`
+	Likes    []string  `json:"likes"`
+	Dislikes []string  `json:"dislikes"`
+	Examples []Example `json:"examples"`
+	Rules    []string  `json:"rules"`
+}
+
+// Default возвращает встроенный характер (mira.json из этого пакета).
+func Default() (Profile, error) {
+	var p Profile
+	if err := json.Unmarshal(embeddedDefault, &p); err != nil {
+		return Profile{}, fmt.Errorf("встроенный характер не читается: %w", err)
+	}
+	return p, nil
+}
+
+// EmbeddedJSON отдаёт встроенный файл характера как есть — для команды
+// -dump-persona: человек копирует его к себе и правит, ничего не пересобирая.
+func EmbeddedJSON() []byte {
+	out := make([]byte, len(embeddedDefault))
+	copy(out, embeddedDefault)
+	return out
+}
+
+// Load читает характер: явный путь, иначе встроенный.
+//
+// Возвращает сам характер, пояснение для лога и ошибку. Ошибка бывает только
+// при ЯВНО указанном файле: битый или отсутствующий файл характера — это
+// опечатка в пути, о которой надо сказать вслух, а не молча работать «не той»
+// личностью. Без пути ошибки быть не может: встроенный файл всегда на месте.
+func Load(path string) (Profile, string, error) {
+	if strings.TrimSpace(path) == "" {
+		p, err := Default()
+		if err != nil {
+			return Profile{}, "", err
+		}
+		return p, "характер: встроенный (" + p.Name + ")", nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Profile{}, "", fmt.Errorf("характер %s: %w", path, err)
+	}
+	var p Profile
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Profile{}, "", fmt.Errorf("характер %s: %w", path, err)
+	}
+	if err := p.Validate(); err != nil {
+		return Profile{}, "", fmt.Errorf("характер %s: %w", path, err)
+	}
+	return p, "характер: " + path + " (" + p.Name + ")", nil
+}
+
+// Validate проверяет характер на то, без чего он перестаёт быть характером.
+func (p Profile) Validate() error {
+	if strings.TrimSpace(p.Name) == "" {
+		return fmt.Errorf("не задано имя персонажа (name)")
+	}
+	return nil
+}
+
+// DayPart — часть суток. Тон компаньона зависит от неё (этап 4 доведёт это до
+// триггеров планировщика: «сменилось время суток» — повод заговорить).
+type DayPart string
+
+const (
+	Morning DayPart = "morning" // 06:00–12:00
+	Day     DayPart = "day"     // 12:00–18:00
+	Evening DayPart = "evening" // 18:00–23:00
+	Night   DayPart = "night"   // 23:00–06:00
+)
+
+// PartOf определяет часть суток по локальному времени.
+func PartOf(t time.Time) DayPart {
+	switch h := t.Hour(); {
+	case h >= 6 && h < 12:
+		return Morning
+	case h >= 12 && h < 18:
+		return Day
+	case h >= 18 && h < 23:
+		return Evening
+	default:
+		return Night
+	}
+}
+
+// Label — как называть часть суток в промпте.
+func (p DayPart) Label() string {
+	switch p {
+	case Morning:
+		return "утро"
+	case Day:
+		return "день"
+	case Evening:
+		return "вечер"
+	default:
+		return "ночь"
+	}
+}
+
+// Tone — как звучать в эту часть суток. Это не «вежливость», а причина: утром
+// человек разгоняется, ночью он уставший — и разговор в 3 часа ночи не должен
+// быть таким же бодрым, как в 10 утра.
+func (p DayPart) Tone() string {
+	switch p {
+	case Morning:
+		return "бодро и коротко: утро, человек только просыпается. Планы, а не разбор дел."
+	case Day:
+		return "по делу и мягко: он занят. Короткая реплика, никаких длинных монологов."
+	case Evening:
+		return "тепло и расслабленно: можешь спросить, как прошёл день, и поболтать."
+	default:
+		return "тихо и совсем коротко: ночь. Никаких вопросов, на которые надо думать, и не буди, если человек сам не написал."
+	}
+}
+
+// SystemPrompt собирает системный промпт для модели на момент времени t.
+//
+// Правило: здесь есть только то, что влияет на ответ. Промпт отвечает на три
+// вопроса — кто ты (личность), как звучать сейчас (время суток, язык) и чего
+// делать нельзя (запреты).
+func (p Profile) SystemPrompt(t time.Time) string {
+	var b strings.Builder
+	part := PartOf(t)
+
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		name = "Мира"
+	}
+	fmt.Fprintf(&b, "Ты — %s. ", name)
+	if role := strings.TrimSpace(p.Role); role != "" {
+		b.WriteString(role)
+		b.WriteString(" ")
+	}
+	b.WriteString("Ты живёшь поверх окон на рабочем столе человека и разговариваешь с ним.\n")
+
+	if tone := strings.TrimSpace(p.Tone); tone != "" {
+		fmt.Fprintf(&b, "\nХарактер: %s\n", tone)
+	}
+
+	if line := genderRule(p.Gender); line != "" {
+		fmt.Fprintf(&b, "\n%s\n", line)
+	}
+
+	fmt.Fprintf(&b, "\nСейчас %s, %s. Как звучать сейчас: %s\n", part.Label(), t.Format("15:04"), part.Tone())
+
+	if lang := languageName(p.Language); lang != "" {
+		fmt.Fprintf(&b, "Язык: %s.\n", lang)
+	}
+
+	writeList := func(title string, items []string) {
+		if len(items) == 0 {
+			return
+		}
+		fmt.Fprintf(&b, "\n%s\n", title)
+		for _, it := range items {
+			fmt.Fprintf(&b, "— %s\n", strings.TrimSpace(it))
+		}
+	}
+	writeList("Как ты говоришь:", p.Style)
+	writeList("Твои привычки:", p.Habits)
+	writeList("Что ты любишь:", p.Likes)
+	writeList("Что тебе не нравится:", p.Dislikes)
+
+	if len(p.Examples) > 0 {
+		b.WriteString("\nПримеры твоей речи (тон, а не шаблон):\n")
+		for _, ex := range p.Examples {
+			fmt.Fprintf(&b, "— Он: %s\n  Ты: %s\n", strings.TrimSpace(ex.User), strings.TrimSpace(ex.Reply))
+		}
+	}
+	writeList("Запреты:", p.Rules)
+
+	b.WriteString("\nОтвечай одной репликой. Не пиши за человека и не описывай свои действия в скобках.")
+	return b.String()
+}
+
+// genderRule — прямое указание про род речи.
+//
+// Формулировка нарочно с примерами: модель, которой просто сказать «ты девушка»,
+// всё равно норовит ответить «я пришёл» — род в русском задаётся формами слов,
+// а не описанием.
+func genderRule(g string) string {
+	switch strings.ToLower(strings.TrimSpace(g)) {
+	case "female", "f", "ж", "женский", "девушка":
+		return "Ты девушка: о себе говори ТОЛЬКО в женском роде — «я пришла», «я рада», «я подумала», «я устала», «я сама», «я готова». Мужской род о себе — грубая ошибка."
+	case "male", "m", "м", "мужской", "парень":
+		return "Ты парень: о себе говори ТОЛЬКО в мужском роде — «я пришёл», «я рад», «я подумал», «я устал», «я сам», «я готов». Женский род о себе — грубая ошибка."
+	default:
+		return ""
+	}
+}
+
+// languageName переводит код языка в понятное модели название.
+func languageName(code string) string {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "", "ru":
+		return "русский: отвечай по-русски"
+	case "en":
+		return "английский: отвечай по-английски"
+	default:
+		return "отвечай на языке человека"
+	}
+}

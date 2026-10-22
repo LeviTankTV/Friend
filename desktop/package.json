@@ -1,0 +1,14 @@
+{
+  "name": "friend-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Обёртка компаньона: прозрачное окно поверх всех, always-on-top, без рамки",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "server": {
+    "addr": "127.0.0.1:8787"
+  },
+  "avatar": {
+    "name": "Мира",
+    "width": 320,
+    "height": 420,
+    "sprite": "",
+    "language": "ru"
+  },
+  "persona": {
+    "file": ""
+  },
+  "llm": {
+    "base_url": "https://integrate.api.nvidia.com/v1",
+    "model": "openai/gpt-oss-20b",
+    "api_key_env": "NVIDIA_API_KEY",
+    "history_messages": 20,
+    "max_tokens": 1024,
+    "temperature": 0.8,
+    "timeout_sec": 45
+  },
+  "proactive": {
+    "tick_seconds": 30,
+    "min_gap_minutes": 25,
+    "quiet_from_hour": 23,
+    "quiet_to_hour": 7,
+    "food_reminder_minutes": 180
+  },
+  "voice": {
+    "enabled": true,
+    "edge_voice": "ru-RU-SvetlanaNeural",
+    "speed": "+0%"
+  },
+  "stt": {
+    "enabled": true,
+    "model_dir": ""
+  },
+  "log": {
+    "level": "info"
+  },
+  "paths": {
+    "state_file": ""
+  }
+}

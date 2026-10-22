@@ -1,0 +1,14 @@
+{
+  "server": { "addr": "127.0.0.1:8898" },
+  "llm": {
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "gpt-oss:120b-cloud",
+    "api_key_env": "",
+    "history_messages": 20,
+    "max_tokens": 1024,
+    "timeout_sec": 60
+  },
+  "paths": { "memory_file": "C:/Users/Tima/AppData/Roaming/Friend/memory-test.db" },
+  "proactive": { "tick_seconds": 2 },
+  "log": { "level": "debug" }
+}

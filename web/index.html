@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Friend — компаньон</title>
+<link rel="stylesheet" href="css/overlay.css">
+</head>
+<body class="overlay">
+  <!-- Сцена персонажа: весь кадр — PixiJS с прозрачным фоном. Кликов по пустому
+       месту быть не должно: в оболочке окно без рамки, и попадание мышью в
+       прозрачную область означало бы «кнопка, которой не видно». Указатель
+       ловит только сам персонаж (см. js/drag.js, класс .grab). -->
+  <div id="stage" class="stage" aria-label="Персонаж"></div>
+
+  <!-- Подпись и индикатор связи: маленькие, поверх угла. Нужны на этапе 1,
+       чтобы видеть, что окно живо и сервер отвечает. -->
+  <div id="hud" class="hud">
+    <span id="dot" class="dot off" title="связь с сервером"></span>
+    <span id="name" class="name">…</span>
+    <span id="hint" class="hint">клик — поговорить, тяни — переехать</span>
+  </div>
+
+  <script src="js/vendor/pixi.min.js"></script>
+  <script src="js/bridge.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/avatar.js"></script>
+  <script src="js/drag.js"></script>
+  <script src="js/pet.js"></script>
+  <script src="js/peek.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/menu.js"></script>
+  <script src="js/music.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

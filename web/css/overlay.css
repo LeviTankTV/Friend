@@ -1,0 +1,341 @@
+/* Окно компаньона: прозрачный фон, никакого скролла и выделения.
+   В браузере (dev-режим) фон подкрашивается еле заметным градиентом — иначе
+   непонятно, где кончается окно. Оболочка ставит body.loaded, и подложка
+   исчезает: в прозрачном окне на рабочем столе её быть не должно. */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+/* dev-подложка: видна, пока не пришло состояние от сервера */
+body.overlay:not(.loaded) {
+  background: radial-gradient(circle at 50% 40%, rgba(90, 120, 200, 0.18), rgba(0, 0, 0, 0.05));
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+}
+
+canvas {
+  display: block;
+  background: transparent;
+}
+
+/* Персонаж: единственная область, которая ловит мышь. */
+.grab { cursor: grab; }
+.grab.dragging { cursor: grabbing; }
+
+* { touch-action: none; }
+
+.hud {
+  position: absolute;
+  left: calc(var(--pad-x, 24px) - 14px);
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #e8ecf5;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e74c3c;
+  box-shadow: 0 0 6px rgba(231, 76, 60, 0.9);
+}
+.dot.on { background: #2ecc71; box-shadow: 0 0 6px rgba(46, 204, 113, 0.9); }
+
+.name { font-weight: 600; }
+
+.hint { opacity: 0.65; }
+body.loaded .hint { opacity: 0; transition: opacity 1.2s ease 1.5s; }
+
+/* --- разговор: облачко реплик и поле ввода --------------------------------
+   Оба живут в углах окна: облачко сверху (над головой персонажа), ввод снизу.
+   По центру они перекрыли бы самого персонажа — а он и есть смысл окна.
+
+   Высоту облачка задаёт НЕ процент от окна, а поле над головой (--pad-top,
+   ставит js/main.js). Раньше здесь стояло 46%: при маленьком окне влезало две
+   строки, при большом — облачко наезжало на лицо. Теперь у него есть отведённая
+   полоса, и она одна при любом размере персонажа. */
+
+.bubble {
+  position: absolute;
+  /* Ширина облачка — по РАЗМЕРУ ПЕРСОНАЖА (--ui-w, его ставит js/main.js), а не
+     по ширине окна. Слева и справа — поля окна (--pad-x). Так облачко стоит над
+     её головой при любой ширине окна, а главное — не растягивается, если окно
+     окажется шире, чем просили (расширение под меню, чужой размер): «облачко на
+     весь экран» получалось именно так. Центрируем его от середины окна: он там
+     же, где персонаж. */
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--ui-w, 320px) - var(--pad-x, 24px) * 2);
+  max-width: calc(100% - var(--pad-x, 24px) * 2);
+  box-sizing: border-box;
+  top: 6px;
+  max-height: calc(var(--pad-top, 84px) - 12px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: rgba(18, 22, 34, 0.86);
+  color: #eef1f8;
+  font-size: 12.5px;
+  line-height: 1.35;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  /* Текст реплики нужно уметь выделить и скопировать — окно не только картинка. */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  z-index: 3;
+}
+.bubble[hidden] { display: none; }
+
+/* Тонкая полоса прокрутки: в окне 320 пикселей обычная отнимает строку текста. */
+.bubble::-webkit-scrollbar { width: 5px; }
+.bubble::-webkit-scrollbar-thumb { background: rgba(238, 241, 248, 0.25); border-radius: 3px; }
+
+.bubble-who {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+.bubble-who:empty { display: none; }
+
+/* Кто говорит — видно по цвету: её реплика, слова человека и сообщение об
+   ошибке не должны выглядеть одинаково. */
+.bubble.you { background: rgba(30, 38, 60, 0.9); }
+.bubble.error { background: rgba(74, 24, 30, 0.92); }
+/* Её собственная реплика (заговорила первой) не должна выглядеть как ответ на
+   его слова: тёплый контур и лёгкий сдвиг подписи — по облачку видно, кто
+   начал разговор. */
+.bubble.proactive { background: rgba(38, 30, 48, 0.92); border: 1px solid rgba(255, 178, 122, 0.55); }
+.bubble.proactive .bubble-who { opacity: 0.85; color: #ffc79a; }
+
+.bubble-dots { display: inline-flex; gap: 4px; padding: 3px 0; }
+.bubble-dots[hidden] { display: none; }
+.bubble-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  animation: friend-blink 1.2s infinite ease-in-out;
+}
+.bubble-dots i:nth-child(2) { animation-delay: 0.2s; }
+.bubble-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes friend-blink {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+.chat-input {
+  position: absolute;
+  /* Та же причина, что у облачка: ширина — по персонажу (--ui-w), а не по окну.
+     Поле ввода «на весь экран» было следствием раздувшегося окна. */
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--ui-w, 320px) - 16px);
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  bottom: 6px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 5px 5px 5px 8px;
+  border-radius: 12px;
+  background: rgba(18, 22, 34, 0.9);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+.chat-input[hidden] { display: none; }
+
+.chat-input textarea {
+  flex: 1;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #eef1f8;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.35;
+  max-height: 72px;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.chat-input textarea::placeholder { color: rgba(238, 241, 248, 0.45); }
+
+.chat-input button {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(111, 140, 255, 0.85);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-input button:hover { background: rgba(111, 140, 255, 1); }
+
+/* Микрофон при записи (этап 7): красный и пульсирует — человек должен видеть,
+   что его слушают, без взгляда на код состояния. */
+.chat-input .chat-mic.recording {
+  background: rgba(255, 84, 84, 0.9);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 84, 84, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(255, 84, 84, 0); }
+}
+
+/* Индикатор фонового слушания имени (wake word): зелёная точка в углу окна,
+   пока микрофон открыт слушать её имя. Человек обязан видеть это. */
+.wake-ind {
+  position: fixed;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #3fd67a;
+  box-shadow: 0 0 6px rgba(63, 214, 122, 0.9);
+  animation: wake-pulse 2.2s ease-in-out infinite;
+  z-index: 6;
+}
+.wake-ind[hidden] { display: none; }
+@keyframes wake-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* Пока открыт ввод, подпись сдвигается ВЫШЕ поля, а не остаётся под ним. */
+body.chat-open .hud { bottom: 52px; }
+body.chat-open .hint { display: none; }
+
+/* --- меню по правому клику ------------------------------------------------
+   Панель занимает боковую полосу, которую окно получает на время меню
+   (js/main.js, growForMenu). Панель НЕ перекрывает персонажа: полоса добавлена
+   рядом с ним, а не поверх него. */
+
+.menu {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 244px;
+  max-width: calc(100vw - 12px);
+  overflow-y: auto;
+  padding: 9px 10px 8px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: rgba(18, 22, 34, 0.94);
+  border: 1px solid rgba(169, 201, 255, 0.22);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: #eef1f8;
+  font-size: 12.5px;
+  line-height: 1.35;
+  z-index: 6;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.menu[hidden] { display: none; }
+/* Полоса меню — с той стороны, куда расширилось окно. */
+body.menu-left .menu { left: 6px; }
+body.menu-right .menu { right: 6px; }
+/* В браузере окно расширить нельзя: панель встаёт поверх левого края. */
+body:not(.menu-left):not(.menu-right) .menu { left: 6px; }
+
+.menu::-webkit-scrollbar { width: 5px; }
+.menu::-webkit-scrollbar-thumb { background: rgba(238, 241, 248, 0.25); border-radius: 3px; }
+
+.menu-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: #a9c9ff;
+}
+
+.menu-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.menu-label { flex: none; opacity: 0.65; font-size: 11.5px; }
+.menu-group { display: block; margin: 10px 0 5px; }
+.menu-value { flex: none; width: 34px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.85; }
+
+.menu input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(169, 201, 255, 0.3);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.menu input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #6c95ff;
+  border: 2px solid #eef1f8;
+  cursor: grab;
+}
+
+.menu-seats { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+
+.menu button {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 7px;
+  border: 1px solid rgba(169, 201, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(30, 38, 60, 0.9);
+  color: #eef1f8;
+  cursor: pointer;
+  text-align: center;
+}
+.menu button:hover { background: rgba(45, 56, 86, 0.95); }
+.menu button.on {
+  background: rgba(108, 149, 255, 0.9);
+  border-color: rgba(169, 201, 255, 0.7);
+  color: #0d1220;
+  font-weight: 600;
+}
+
+.menu-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0;
+  cursor: pointer;
+}
+.menu-check input { accent-color: #6c95ff; width: 13px; height: 13px; cursor: pointer; }
+
+.menu-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 10px; }
+.menu-action { padding: 6px 7px; }
+
+.menu-hint { margin-top: 9px; font-size: 10.5px; opacity: 0.5; line-height: 1.3; }
+
+/* Пока открыто меню, облачко и поле ввода прячутся: они делят с ним место в
+   окне, и два слоя текста одновременно нечитаемы. */
+body.menu-open .bubble,
+body.menu-open .chat-input { display: none; }
