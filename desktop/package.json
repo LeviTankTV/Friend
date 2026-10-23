@@ -6,9 +6,48 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "start:dev": "electron . --dev"
+    "start:dev": "electron . --dev",
+    "go": "node ../scripts/build-go.js",
+    "dist": "npm run go && electron-builder"
   },
   "devDependencies": {
-    "electron": "^32.2.0"
+    "electron": "^32.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "dev.friend.companion",
+    "productName": "Friend",
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "../bin", "to": "bin" },
+      { "from": "../web", "to": "web" }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.lifestyle",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Микрофон нужен для голосового ввода и отклика по имени; запись распознаётся локально и не покидает компьютер"
+      }
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Utility"
+    }
   }
 }
