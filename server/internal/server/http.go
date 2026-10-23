@@ -191,7 +191,7 @@ func New(opts Options) (*http.Server, error) {
 					http.Error(w, "распознавание не удалось: "+err.Error(), http.StatusServiceUnavailable)
 					return
 				}
-				mentioned := WakeMention(text)
+				mentioned := opts.Hub.WakeMatch(text)
 				if mentioned {
 					// В лог — только факт, не слова человека.
 					opts.Log.Info("услышала своё имя")

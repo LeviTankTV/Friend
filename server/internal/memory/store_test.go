@@ -230,3 +230,30 @@ func TestTokenizeFilters(t *testing.T) {
 		t.Fatalf("лимит токенов: %q", strings.Join(got, " "))
 	}
 }
+
+// Этап 10: факты и запросы по-английски находятся тем же префиксным поиском,
+// а запрос из английских стоп-слов — «не о чём», свежие факты (как русский
+// запрос из предлогов).
+func TestRecallEnglish(t *testing.T) {
+	s := open(t)
+	if _, err := s.Remember("my sister's birthday is on March 3", "user", at); err != nil {
+		t.Fatalf("запомнить: %v", err)
+	}
+	if _, err := s.Remember("the office is cold in the morning", "user", at.Add(time.Hour)); err != nil {
+		t.Fatalf("запомнить: %v", err)
+	}
+	facts, err := s.Recall("when is my sister birthday?", 5)
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(facts) != 1 || !strings.Contains(facts[0].Text, "birthday") {
+		t.Fatalf("английский запрос должен находить факт про сестру: %+v", facts)
+	}
+	facts, err = s.Recall("the and was are", 5)
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(facts) != 2 {
+		t.Fatalf("запрос из стоп-слов — свежие факты, а не пустота: %+v", facts)
+	}
+}

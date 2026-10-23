@@ -190,6 +190,16 @@ var stopWords = map[string]bool{
 	"have": true, "been": true, "from": true, "there": true, "their": true,
 	"them": true, "then": true, "they": true, "will": true, "would": true,
 	"could": true, "should": true, "your": true,
+	// английские частотные (этап 10): запрос из них — «ответить нечем»,
+	// а не подбор всех фактов подряд
+	"the": true, "and": true, "was": true, "are": true, "his": true,
+	"her": true, "its": true, "our": true, "you": true, "she": true,
+	"him": true, "who": true, "why": true, "how": true, "all": true,
+	"any": true, "for": true, "not": true, "but": true, "can": true,
+	"did": true, "does": true, "had": true, "has": true, "also": true,
+	"just": true, "when": true, "where": true, "which": true, "while": true,
+	"because": true, "really": true, "very": true, "one": true, "two": true,
+	"get": true, "got": true, "out": true, "too": true, "now": true,
 }
 
 // tokenize разбивает текст на слова, пригодные для FTS5-запроса: только
