@@ -148,10 +148,13 @@ type ReplyErrorMsg struct {
 // AvatarInfo — что клиенту нужно знать о персонаже (имя показывается в подписи,
 // спрайт приедет на этапе 6).
 type AvatarInfo struct {
-	Name   string `json:"name"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-	Sprite string `json:"sprite"`
+	Name string `json:"name"`
+	// Language — язык персонажа из конфига (ru/en, этап 10): страница по нему
+	// выбирает словарь интерфейса и её локальных фраз.
+	Language string `json:"language,omitempty"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Sprite   string `json:"sprite"`
 }
 
 // MoodInfo — внутреннее состояние (этап 5) для клиента: три числа и

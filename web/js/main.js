@@ -49,7 +49,20 @@
     stage: document.getElementById('stage'),
     dot: document.getElementById('dot'),
     name: document.getElementById('name'),
+    hint: document.getElementById('hint'),
   };
+
+  // applyLang — надписи каркаса (заголовок окна, подсказка, aria) из словаря.
+  // Вызывается на старте (язык по умолчанию — ru) и снова из welcome, когда
+  // сервер назовёт язык конфига.
+  let personaName = friendLang.L('chat.defaultName');
+  function applyLang() {
+    document.title = friendLang.L('app.title');
+    el.stage.setAttribute('aria-label', friendLang.L('app.stageAria'));
+    el.dot.title = friendLang.L('hud.linkTitle');
+    if (el.hint) el.hint.textContent = friendLang.L('hud.hint');
+    wakeDot.title = friendLang.L('wake.dotTitle', { name: personaName });
+  }
 
   // Размер canvas задаём ЯВНО из контейнера, а не через resizeTo: window.
   // resizeTo пересчитывает размер только по событию resize, и если страница
@@ -67,11 +80,12 @@
 
   // Индикатор фонового слушания её имени (wake word, этап 7): пока слушатель
   // работает, точка горит — человек обязан видеть, что микрофон открыт.
+  // Подпись точки зависит от языка и имени — обновляется applyLang.
   const wakeDot = document.createElement('div');
   wakeDot.className = 'wake-ind';
-  wakeDot.title = 'Мира слушает только своё имя: аудио расшифровывается локально и нигде не записывается';
   wakeDot.hidden = true;
   document.body.appendChild(wakeDot);
+  applyLang();
 
   // Оболочка может поставить окно НЕ туда, куда её попросили: она держит его в
   // видимой части рабочего стола. Например, сохранённая позиция оказалась за
@@ -528,7 +542,7 @@
           // Активного окна с верхом нет (рабочий стол, блокировка, мелкое окно) —
           // посадка невозможна: возвращаем «свободно» и говорим почему.
           menu.setSeat('free');
-          chat.showLine('her', 'Сейчас не на что сесть — нет активного окна.');
+          chat.showLine('her', friendLang.L('seat.noWindow'));
           return Promise.resolve();
         }
         avatar.setPose('sit');
@@ -768,7 +782,7 @@
   const WAKE_MIN_SEC = 0.4;         // короче — не речь, не гоняем модель
   const WAKE_MAX_SEC = 12;          // потолок куска: длинную речь режем
 
-  const WAKE_PHRASES = ['Да! Я тут.', 'Слушаю тебя.', 'Я здесь!', 'Ага, я слушаю.'];
+  const WAKE_PHRASES = () => friendLang.list('wake.phrases');
   let wakePhraseIndex = 0;
 
   function wakeEnabled() {
@@ -878,19 +892,13 @@
     wakeEvents++;
     avatar.setEmotion('happy');
     if (avatar.wave) avatar.wave();
-    const phrase = WAKE_PHRASES[wakePhraseIndex++ % WAKE_PHRASES.length];
+    const phrases = WAKE_PHRASES();
+    const phrase = phrases[wakePhraseIndex++ % phrases.length];
     chat.showLine('her', phrase);
     speak(phrase);
   });
 
-  const POKE_PHRASES = [
-    'М?',
-    'Я тут.',
-    'Да, я на месте.',
-    'Хм? Что стряслось?',
-    'Приятно, что ты меня замечаешь.',
-    'Ага, слушаю.',
-  ];
+  const POKE_PHRASES = () => friendLang.list('poke.phrases');
   let lastPoke = 0;
   let lastPokeIndex = -1;
 
@@ -899,9 +907,10 @@
     // «её нет». Фраза пробуждения своя, не из пула.
     if (avatar.emotion() === 'sleep') {
       avatar.setEmotion(avatar.calmFace());
-      chat.showLine('her', 'Мм? Да, я тут.');
-      avatar.say('Мм? Да, я тут.');
-      speak('Мм? Да, я тут.');
+      const wake = friendLang.L('wake.awakePhrase');
+      chat.showLine('her', wake);
+      avatar.say(wake);
+      speak(wake);
       lastPoke = Date.now();
       return;
     }
@@ -910,10 +919,11 @@
     // на десять секунд, дальше — молча открывает поле ввода.
     if (now - lastPoke < 10000) return;
     lastPoke = now;
-    let idx = Math.floor(Math.random() * POKE_PHRASES.length);
-    if (idx === lastPokeIndex) idx = (idx + 1) % POKE_PHRASES.length;
+    const phrases = POKE_PHRASES();
+    let idx = Math.floor(Math.random() * phrases.length);
+    if (idx === lastPokeIndex) idx = (idx + 1) % phrases.length;
     lastPokeIndex = idx;
-    const phrase = POKE_PHRASES[idx];
+    const phrase = phrases[idx];
     chat.showLine('her', phrase);
     avatar.say(phrase);
     speak(phrase);
@@ -1186,9 +1196,20 @@
   let appliedOnce = false;
   net.on('welcome', (msg) => {
     const av = msg.avatar || {};
+    // Язык персоны — поле конфига (avatar.language): страница собрана на
+    // русском по умолчанию, здесь переключаем словарь и перекрашиваем
+    // подписи, собранные один раз (меню, поле ввода, каркас).
+    if (av.language && av.language !== friendLang.code()) {
+      friendLang.set(av.language);
+      applyLang();
+      if (chat.setLanguage) chat.setLanguage();
+      if (menu.setLanguage) menu.setLanguage();
+    }
     if (av.name) {
+      personaName = av.name;
       el.name.textContent = av.name;
       menu.setName(av.name);
+      applyLang();
     }
     chat.setName(av.name);
     // История разговора: сервер помнит последние реплики, пока жив, — после
@@ -1353,7 +1374,7 @@
     wakeSend: (blob) => encodeWav16k(blob).then(
       (wav) => fetch('/wake', { method: 'POST', body: wav }).then((r) => r.json()),
     ),
-    wakePhrases: () => WAKE_PHRASES.slice(),
+    wakePhrases: () => WAKE_PHRASES().slice(),
     wakeEvents: () => wakeEvents,
     windowSize: windowSize,
     anchor: function () { return { x: anchor.x, y: anchor.y }; },

@@ -40,12 +40,14 @@ window.FriendMenu = (function () {
                          // лишняя фоновая служба без спроса человека, выкл
   };
 
+  // Посадки — только идентификаторы: подписи и подсказки живут в словаре
+  // (js/lang/*.js) и подставляются при сборке меню и при смене языка.
   const SEATS = [
-    { id: 'free', label: 'свободно', hint: 'ставится туда, куда её отнесли мышью' },
-    { id: 'taskbar', label: 'на панель задач', hint: 'садится на нижнюю панель' },
-    { id: 'window', label: 'на окне', hint: 'садится на верх активного окна; окно сменилось — переезжает на новое' },
-    { id: 'edge-left', label: 'у левого края', hint: 'выглядывает из-за края экрана' },
-    { id: 'edge-right', label: 'у правого края', hint: 'выглядывает из-за края экрана' },
+    { id: 'free' },
+    { id: 'taskbar' },
+    { id: 'window' },
+    { id: 'edge-left' },
+    { id: 'edge-right' },
   ];
 
   // pick — привести сохранённое к значениям по умолчанию: чужие поля и не тот тип
@@ -118,22 +120,23 @@ window.FriendMenu = (function () {
     const panel = el('div', 'menu');
     panel.hidden = true;
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'меню персонажа');
+    panel.setAttribute('aria-label', friendLang.L('menu.aria'));
 
-    const title = el('div', 'menu-title', (o.name || 'персонаж'));
+    const title = el('div', 'menu-title', (o.name || friendLang.L('menu.title')));
     panel.appendChild(title);
 
     // Размер — ползунок. Рядом живое число: без него непонятно, насколько
     // «больше» станет персонаж, а окно растёт вместе с ним.
     const sizeRow = el('div', 'menu-row');
-    sizeRow.appendChild(el('span', 'menu-label', 'размер'));
+    const sizeLabel = el('span', 'menu-label', friendLang.L('menu.sizeLabel'));
+    sizeRow.appendChild(sizeLabel);
     const sizeInput = document.createElement('input');
     sizeInput.type = 'range';
     sizeInput.min = String(o.minPix || 2);
     sizeInput.max = String(o.maxPix || 12);
     sizeInput.step = '1';
     sizeInput.value = String(settings.pix);
-    sizeInput.setAttribute('aria-label', 'размер персонажа');
+    sizeInput.setAttribute('aria-label', friendLang.L('menu.sizeAria'));
     const sizeValue = el('span', 'menu-value', settings.pix + ' px');
     sizeRow.appendChild(sizeInput);
     sizeRow.appendChild(sizeValue);
@@ -143,27 +146,30 @@ window.FriendMenu = (function () {
     // «вкл/выкл», а насколько сильно она провожает курсор глазами. Живое
     // число рядом: «64» видно, и на глаз понятно, половина это силы или нет.
     const followRow = el('div', 'menu-row');
-    followRow.appendChild(el('span', 'menu-label', 'следит за курсором'));
+    const followLabel = el('span', 'menu-label', friendLang.L('menu.followLabel'));
+    followRow.appendChild(followLabel);
     const followInput = document.createElement('input');
     followInput.type = 'range';
     followInput.min = '0';
     followInput.max = '100';
     followInput.step = '1';
     followInput.value = String(settings.follow);
-    followInput.setAttribute('aria-label', 'сила слежения за курсором');
+    followInput.setAttribute('aria-label', friendLang.L('menu.followAria'));
     const followValue = el('span', 'menu-value', settings.follow + ' %');
     followRow.appendChild(followInput);
     followRow.appendChild(followValue);
     panel.appendChild(followRow);
 
     // Куда посадить.
-    panel.appendChild(el('div', 'menu-label menu-group', 'посадить'));
+    const seatGroup = el('div', 'menu-label menu-group', friendLang.L('menu.groupSeat'));
+    panel.appendChild(seatGroup);
     const seatRow = el('div', 'menu-seats');
     const seatButtons = {};
     for (const seat of SEATS) {
-      const btn = el('button', 'menu-seat', seat.label);
+      const btn = el('button', 'menu-seat');
       btn.type = 'button';
-      btn.title = seat.hint;
+      btn.textContent = friendLang.L('seat.' + seat.id + '.label');
+      btn.title = friendLang.L('seat.' + seat.id + '.hint');
       btn.addEventListener('click', () => {
         apply('seat', seat.id);
       });
@@ -174,13 +180,14 @@ window.FriendMenu = (function () {
 
     // Переключатели.
     const toggles = [
-      { id: 'keepTop', label: 'поверх всех окон' },
-      { id: 'voice', label: 'говорит вслух' },
-      { id: 'dance', label: 'танцует под музыку' },
-      { id: 'wake', label: 'слышит её имя' },
-      { id: 'autostart', label: 'запускать при входе' },
+      { id: 'keepTop' },
+      { id: 'voice' },
+      { id: 'dance' },
+      { id: 'wake' },
+      { id: 'autostart' },
     ];
     const checkboxes = {};
+    const toggleLabels = {};
     for (const t of toggles) {
       const row = el('label', 'menu-check');
       const box = document.createElement('input');
@@ -188,31 +195,35 @@ window.FriendMenu = (function () {
       box.checked = !!settings[t.id];
       box.addEventListener('change', () => apply(t.id, box.checked));
       row.appendChild(box);
-      row.appendChild(el('span', '', t.label));
+      const label = el('span', '', friendLang.L('toggle.' + t.id));
+      row.appendChild(label);
       checkboxes[t.id] = box;
+      toggleLabels[t.id] = label;
       panel.appendChild(row);
     }
 
     // Действия.
     const actions = el('div', 'menu-actions');
     const actionsList = [
-      ['поговорить', () => o.onTalk && o.onTalk()],
-      ['помахать', () => o.onWave && o.onWave()],
-      ['домой', () => o.onHome && o.onHome()],
-      ['выход', () => o.onQuit && o.onQuit()],
+      ['action.talk', () => o.onTalk && o.onTalk()],
+      ['action.wave', () => o.onWave && o.onWave()],
+      ['action.home', () => o.onHome && o.onHome()],
+      ['action.quit', () => o.onQuit && o.onQuit()],
     ];
-    for (const [label, fn] of actionsList) {
-      const btn = el('button', 'menu-action', label);
+    const actionButtons = [];
+    for (const [key, fn] of actionsList) {
+      const btn = el('button', 'menu-action', friendLang.L(key));
       btn.type = 'button';
       btn.addEventListener('click', () => {
         close();
         fn();
       });
+      actionButtons.push({ btn: btn, key: key });
       actions.appendChild(btn);
     }
     panel.appendChild(actions);
 
-    const hint = el('div', 'menu-hint', 'правая кнопка — меню, перетаскивание — переехать, колесо — размер');
+    const hint = el('div', 'menu-hint', friendLang.L('menu.hint'));
     panel.appendChild(hint);
 
     document.body.appendChild(panel);
@@ -336,6 +347,24 @@ window.FriendMenu = (function () {
       },
       setName: function (name) {
         if (name) title.textContent = name;
+      },
+      // setLanguage — после welcome с другим языком: панель собрана один раз,
+      // поэтому подписи перезаписываем на месте. Название персоны остаётся
+      // (его пришёл welcome), настройки не трогаем.
+      setLanguage: function () {
+        panel.setAttribute('aria-label', friendLang.L('menu.aria'));
+        sizeLabel.textContent = friendLang.L('menu.sizeLabel');
+        sizeInput.setAttribute('aria-label', friendLang.L('menu.sizeAria'));
+        followLabel.textContent = friendLang.L('menu.followLabel');
+        followInput.setAttribute('aria-label', friendLang.L('menu.followAria'));
+        seatGroup.textContent = friendLang.L('menu.groupSeat');
+        for (const seat of SEATS) {
+          seatButtons[seat.id].textContent = friendLang.L('seat.' + seat.id + '.label');
+          seatButtons[seat.id].title = friendLang.L('seat.' + seat.id + '.hint');
+        }
+        for (const t of toggles) toggleLabels[t.id].textContent = friendLang.L('toggle.' + t.id);
+        for (const a of actionButtons) a.btn.textContent = friendLang.L(a.key);
+        hint.textContent = friendLang.L('menu.hint');
       },
       panel: panel,
     };

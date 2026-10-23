@@ -64,13 +64,13 @@ window.FriendChat = (function () {
     const field = document.createElement('textarea');
     field.rows = 1;
     field.maxLength = MAX_LEN;
-    field.placeholder = 'напиши ей…';
-    field.setAttribute('aria-label', 'сообщение персонажу');
+    field.placeholder = friendLang.L('chat.placeholder');
+    field.setAttribute('aria-label', friendLang.L('chat.aria'));
 
     const submit = document.createElement('button');
     submit.type = 'submit';
     submit.textContent = '→';
-    submit.title = 'Отправить (Enter)';
+    submit.title = friendLang.L('chat.sendTitle');
 
     // Микрофон (этап 7): появляется только когда сервер подтвердил, что
     // умеет расшифровывать (поле stt в welcome).
@@ -78,7 +78,7 @@ window.FriendChat = (function () {
     mic.type = 'button';
     mic.className = 'chat-mic';
     mic.textContent = '🎙';
-    mic.title = 'Сказать вслух — текст расшифруется локально и попадёт в поле';
+    mic.title = friendLang.L('chat.micTitle');
     mic.hidden = true;
 
     form.appendChild(field);
@@ -92,7 +92,9 @@ window.FriendChat = (function () {
     let hideTimer = null;
     let thinkingTimer = null;
     let thinking = false;
-    let chatName = 'Алина';
+    // Имя до welcome: язык страницы уже известен при сборке (словарь ru по
+    // умолчанию), welcome его уточнит вместе с именем персоны.
+    let chatName = friendLang.L('chat.defaultName');
 
     function setName(name) {
       if (name) chatName = name;
@@ -114,7 +116,7 @@ window.FriendChat = (function () {
       bubble.hidden = false;
       dots.hidden = true;
       text.hidden = false;
-      who.textContent = kind === 'you' ? 'ты' : (kind === 'error' ? 'не получилось' : chatName);
+      who.textContent = kind === 'you' ? friendLang.L('chat.you') : (kind === 'error' ? friendLang.L('chat.errorWho') : chatName);
       text.textContent = message;
       hideTimer = setTimeout(hideBubble, kind === 'error' ? ERROR_HIDE_AFTER_MS : HIDE_AFTER_MS);
     }
@@ -140,7 +142,7 @@ window.FriendChat = (function () {
         if (avatar) avatar.setEmotion('think');
         thinkingTimer = setTimeout(() => {
           setThinking(false);
-          showLine('error', 'Ответ так и не пришёл. Проверь индикатор связи в углу окна.');
+          showLine('error', friendLang.L('chat.errTimeout'));
         }, THINKING_TIMEOUT_MS);
         return;
       }
@@ -152,7 +154,7 @@ window.FriendChat = (function () {
       const value = field.value.trim();
       if (!value) return;
       if (!net.send({ type: 'say', text: value })) {
-        showLine('error', 'Нет связи с сервером: сообщение не ушло. Индикатор в углу показывает состояние связи.');
+        showLine('error', friendLang.L('chat.errNoConn'));
         return;
       }
       showLine('you', value);
@@ -200,9 +202,7 @@ window.FriendChat = (function () {
     function micLook(on) {
       mic.classList.toggle('recording', on);
       mic.textContent = on ? '⏹' : '🎙';
-      mic.title = on
-        ? 'Остановить и расшифровать'
-        : 'Сказать вслух — текст расшифруется локально и попадёт в поле';
+      mic.title = on ? friendLang.L('chat.micTitleStop') : friendLang.L('chat.micTitle');
     }
 
     function pickMime() {
@@ -221,7 +221,7 @@ window.FriendChat = (function () {
           audio: { echoCancellation: true, noiseSuppression: true },
         });
       } catch (e) {
-        showLine('error', 'Микрофон не открылся: ' + (e && e.name ? e.name : 'отказ в доступе') + '.');
+        showLine('error', friendLang.L('chat.errMic', { reason: e && e.name ? e.name : friendLang.L('chat.micDenied') }));
         return;
       }
       chunks = [];
@@ -249,16 +249,16 @@ window.FriendChat = (function () {
       const discard = micDiscard;
       micDiscard = false;
       if (discard) return;
-      if (!data.length) { showLine('error', 'Запись вышла пустой — попробуй ещё раз.'); return; }
+      if (!data.length) { showLine('error', friendLang.L('chat.errEmptyRec')); return; }
       const blob = new Blob(data, { type: 'audio/webm' });
       let text = '';
       try {
         text = await o.transcribe(blob);
       } catch (e) {
-        showLine('error', 'Распознавание не удалось: ' + (e && e.message ? e.message : 'нет ответа сервера') + '.');
+        showLine('error', friendLang.L('chat.errStt', { reason: e && e.message ? e.message : friendLang.L('chat.sttNoAnswer') }));
         return;
       }
-      if (!text) { showLine('error', 'Ничего не расслышала — скажи чуть громче.'); return; }
+      if (!text) { showLine('error', friendLang.L('chat.errNoHear')); return; }
       // Слово человека в поле, а не сразу в эфир: набранный текст человек
       // читает глазами, и расшифрованное слово должно появиться в том же месте —
       // иначе непонятно, ушло оно или её надо отправить.
@@ -351,7 +351,7 @@ window.FriendChat = (function () {
 
       net.on('reply_error', (msg) => {
         setThinking(false);
-        showLine('error', (msg && msg.error) || 'Не получилось ответить.');
+        showLine('error', (msg && msg.error) || friendLang.L('chat.errReply'));
       });
     }
 
@@ -364,6 +364,16 @@ window.FriendChat = (function () {
       showLine(last.role === 'user' ? 'you' : 'her', last.text || '');
     }
 
+    // setLanguage — после welcome с другим языком: подписи, которые рисуются
+    // один раз при сборке, обновляются на месте (сами сообщения ошибок уже
+    // берутся из словаря в момент показа).
+    function setLanguage() {
+      field.placeholder = friendLang.L('chat.placeholder');
+      field.setAttribute('aria-label', friendLang.L('chat.aria'));
+      submit.title = friendLang.L('chat.sendTitle');
+      micLook(false);
+    }
+
     return {
       toggle: toggle,
       open: open,
@@ -373,6 +383,7 @@ window.FriendChat = (function () {
       // можно ли прятать её за край экрана (см. js/main.js, holdOut).
       isThinking: function () { return thinking; },
       setName: setName,
+      setLanguage: setLanguage,
       showLine: showLine,
       showHistory: showHistory,
       setThinking: setThinking,
