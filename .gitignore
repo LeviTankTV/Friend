@@ -3,6 +3,14 @@ node_modules/
 *.log
 .zcode/
 
+# Собранные бинари (companion/focuswatch/soundwatch и отладочные копии):
+# сборка идёт в bin/, случайные артефакты в server/ — мусор, не код.
+server/*.exe
+server/companion
+server/focuswatch
+server/soundwatch
+server/soundwatch_dbg
+
 # Windows-артефакт случайного редиректа в start.bat: имя зарезервировано,
 # git на нём падает.
 nul

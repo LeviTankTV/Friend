@@ -1,0 +1,254 @@
+// Package x11 — клиент X11 на чистом Go: никаких cgo, никаких внешних
+// модулей. Нужен ровно три вещи: какое окно активно (_NET_ACTIVE_WINDOW),
+// его имя (_NET_WM_NAME), pid процесса (_NET_WM_PID), геометрия (GetGeometry)
+// и простой в секундах (MIT-SCREEN-SAVER QueryInfo).
+//
+// Приватность та же, что на Windows: наружу уходят ИМЯ ПРОЦЕССА и ЗАГОЛОВОК
+// окна (плюс прямоугольник для посадки) — никакого содержимого окон здесь
+// физически и быть не может: протокол умеет только свойства окна.
+package x11
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// Display — разбор переменной DISPLAY. Понимаем локальный X-сервер
+// («:0», «:10.0» — unix-сокет /tmp/.X11-unix/XN) и localhost по TCP
+// («localhost:0»). X-сервер на чужой машине нам не нужен: помощник живёт
+// рядом с экраном, который смотрит человек.
+type Display struct {
+	Socket string // путь unix-сокета (для «:0» — /tmp/.X11-unix/X0)
+	TCP    string // «host:port» (для «localhost:0») — пусто, если сокет
+	Screen int    // номер экрана из «:0.1» (обычно 0)
+	Number int    // номер дисплея N
+}
+
+// ParseDisplay разбирает значение DISPLAY. Ошибки — с человеческой причиной.
+func ParseDisplay(s string) (Display, error) {
+	if s == "" {
+		return Display{}, errors.New("DISPLAY не задан")
+	}
+	host, rest, found := strings.Cut(s, ":")
+	if !found {
+		return Display{}, fmt.Errorf("DISPLAY %q: нет номера дисплея", s)
+	}
+	if host != "" && host != "localhost" {
+		return Display{}, fmt.Errorf("DISPLAY %q: помощник умеет только локальный X-сервер", s)
+	}
+	numStr := rest
+	if i := strings.IndexAny(rest, "."); i >= 0 {
+		numStr = rest[:i]
+	}
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return Display{}, fmt.Errorf("DISPLAY %q: номер дисплея не число", s)
+	}
+	screen := 0
+	if len(rest) > len(numStr)+1 {
+		screen, _ = strconv.Atoi(rest[len(numStr)+1:])
+	}
+	d := Display{Screen: screen, Number: num}
+	if host == "localhost" {
+		d.TCP = fmt.Sprintf("localhost:%d", 6000+num)
+	} else {
+		d.Socket = fmt.Sprintf("/tmp/.X11-unix/X%d", num)
+	}
+	return d, nil
+}
+
+// Cookie — запись файла Xauthority (MIT-MAGIC-COOKIE-1): имя метода и данные.
+type Cookie struct {
+	Name string
+	Data []byte
+}
+
+// family-коды Xauthority (X.h). FamilyLocal (256) — «локальный пир»,
+// аутентификация по пир-контентам сокета, cookie не нужен.
+const (
+	familyWildMask         = 0
+	familyLocal            = 256
+	familyNET              = 19
+	familyServerInterpreted = 11
+)
+
+// ParseXauthority читает файл Xauthority и отдаёт cookie для указанного
+// дисплея. Формат: family(u16) addr(строка) number(строка) name(строка)
+// data(строка), длина каждой — u32.
+func ParseXauthority(path string, display Display) (Cookie, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Cookie{}, err
+	}
+	p := raw
+	rd := func() (string, error) {
+		if len(p) < 4 {
+			return "", errors.New("Xauthority: обрыв")
+		}
+		n := int(binary.LittleEndian.Uint32(p))
+		p = p[4:]
+		if n < 0 || len(p) < n {
+			return "", errors.New("Xauthority: обрыв")
+		}
+		s := string(p[:n])
+		p = p[n:]
+		return s, nil
+	}
+	wantNum := strconv.Itoa(display.Number)
+	for len(p) > 0 {
+		if len(p) < 2 {
+			return Cookie{}, errors.New("Xauthority: обрыв")
+		}
+		fam := int(binary.LittleEndian.Uint16(p))
+		p = p[2:]
+		// Адрес (имя хоста) в записи нас не интересует: локальные семейства
+		// и так годятся, чужие адреса мы не принимаем.
+		if _, err := rd(); err != nil {
+			return Cookie{}, err
+		}
+		num, err := rd()
+		if err != nil {
+			return Cookie{}, err
+		}
+		name, err := rd()
+		if err != nil {
+			return Cookie{}, err
+		}
+		data, err := rd()
+		if err != nil {
+			return Cookie{}, err
+		}
+		// FamilyLocal: адрес устаревший и почти всегда пустой, номер
+		// дисплея обязано совпадать. Остальные семейства сопоставляем по
+		// адресу с локальным хостом.
+		numOk := num == wantNum
+		famOk := fam == familyLocal || fam == familyWildMask ||
+			fam == familyServerInterpreted || fam == familyNET
+		if numOk && famOk && name == "MIT-MAGIC-COOKIE-1" {
+			return Cookie{Name: name, Data: []byte(data)}, nil
+		}
+	}
+	return Cookie{}, errors.New("Xauthority: cookie для этого дисплея не найден")
+}
+
+// Connect открывает соединение с локальным X-сервером по DISPLAY и
+// проходит рукопожатие (с cookie из XAUTHORITY, если он есть).
+func Connect() (*Client, error) {
+	d, err := ParseDisplay(os.Getenv("DISPLAY"))
+	if err != nil {
+		return nil, err
+	}
+	var conn net.Conn
+	if d.TCP != "" {
+		conn, err = net.Dial("tcp", d.TCP)
+	} else {
+		conn, err = net.Dial("unix", d.Socket)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("X-сервер %q недоступен: %w", displayHint(d), err)
+	}
+	cl := &Client{conn: conn}
+	if err := cl.handshake(d, xauthCookie()); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return cl, nil
+}
+
+func displayHint(d Display) string {
+	if d.TCP != "" {
+		return d.TCP
+	}
+	return d.Socket
+}
+
+// xauthCookie — cookie из $XAUTHORITY (или ~/.Xauthority). Не нашёл — пустой:
+// локальные сессии (GNOME/KDE на X11) принимают соединение по пир-контентам.
+func xauthCookie() Cookie {
+	path := os.Getenv("XAUTHORITY")
+	if path == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = home + "/.Xauthority"
+		}
+	}
+	d, err := ParseDisplay(os.Getenv("DISPLAY"))
+	if err != nil || path == "" {
+		return Cookie{}
+	}
+	c, err := ParseXauthority(path, d)
+	if err != nil {
+		return Cookie{}
+	}
+	return c
+}
+
+const byteOrder = 12 // LittleEndian — как в X.h: 12 = «little endian byte order»
+
+// handshake — рукопожатие X11: порядок байт, версии протокола, имя метода
+// аутентификации и данные. Дальше читаем ответ (1 байт успеха + setup-заголовок).
+func (c *Client) handshake(d Display, ck Cookie) error {
+	major := uint16(11)
+	minor := uint16(0)
+	name := []byte("MIT-MAGIC-COOKIE-1")
+	data := ck.Data
+	if len(data) == 0 {
+		name = []byte{}
+	}
+	// padding до 4 байт
+	pad := func(b []byte) []byte {
+		for len(b)%4 != 0 {
+			b = append(b, 0)
+		}
+		return b
+	}
+	req := make([]byte, 0, 12+len(pad(name))+len(pad(data)))
+	req = append(req, byteOrder)
+	req = binary.BigEndian.AppendUint16(req, major)
+	req = binary.BigEndian.AppendUint16(req, minor)
+	req = binary.BigEndian.AppendUint16(req, uint16(len(name)))
+	req = binary.BigEndian.AppendUint16(req, uint16(len(data)))
+	req = binary.BigEndian.AppendUint16(req, 0) // extra-length
+	req = append(req, pad(name)...)
+	req = append(req, pad(data)...)
+	if _, err := c.conn.Write(req); err != nil {
+		return fmt.Errorf("X-рукопожатие: запись: %w", err)
+	}
+	first := make([]byte, 1)
+	if _, err := io.ReadFull(c.conn, first); err != nil {
+		return fmt.Errorf("X-рукопожатие: чтение: %w", err)
+	}
+	switch first[0] {
+	case 0: // Failed
+		var h [8]byte
+		io.ReadFull(c.conn, h[:])
+		reasonLen := int(binary.LittleEndian.Uint16(h[4:6]))
+		buf := make([]byte, reasonLen)
+		io.ReadFull(c.conn, buf)
+		return fmt.Errorf("X-сервер не принял нас: %s (нужен локальный X-сервер, не Wayland)", buf)
+	case 1: // Success
+		// Setup-заголовок — 8 байт после байта успеха: release(2)+id(2)+
+		// res_len(2)+min_len(2) (res_len — в 4-байтных словах).
+		hdr := make([]byte, 8)
+		if _, err := io.ReadFull(c.conn, hdr); err != nil {
+			return fmt.Errorf("X-рукопожатие: setup-заголовок: %w", err)
+		}
+		resLen := int(binary.LittleEndian.Uint16(hdr[4:6]))
+		if resLen > 0 {
+			skip := make([]byte, resLen*4)
+			if _, err := io.ReadFull(c.conn, skip); err != nil {
+				return fmt.Errorf("X-рукопожатие: setup-данные: %w", err)
+			}
+		}
+		return nil
+	case 2: // Authenticate
+		return errors.New("X-сервер просит аутентификацию, которой у нас нет (нужен XAUTHORITY)")
+	default:
+		return fmt.Errorf("X-рукопожатие: неожиданный ответ %d", first[0])
+	}
+}
