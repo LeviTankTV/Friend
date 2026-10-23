@@ -60,15 +60,16 @@ func run() error {
 	webDir := fs.String("web", "", "каталог фронтенда персонажа (по умолчанию — web рядом с проектом)")
 	// -dump-persona: выложить встроенный характер в файл и выйти. Так характер
 	// можно править под себя, не пересобирая сервер и не разбирая бинарник.
-	dumpPersona := fs.Bool("dump-persona", false, "напечатать встроенный характер (JSON) и выйти")
+	// Значение — язык файла (ru по умолчанию, en — английская Mira).
+	dumpPersona := fs.String("dump-persona", "", "напечатать встроенный характер (JSON) и выйти; значение — язык (ru/en)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	if cfgPath := config.ConfigPathFromArgs(os.Args[1:]); cfgPath != "" && *configPath == "" {
 		*configPath = cfgPath
 	}
-	if *dumpPersona {
-		_, err := os.Stdout.Write(persona.EmbeddedJSON())
+	if *dumpPersona != "" {
+		_, err := os.Stdout.Write(persona.EmbeddedJSONFor(*dumpPersona))
 		return err
 	}
 
@@ -106,11 +107,15 @@ func run() error {
 		log.Info("файла ключей .env нет", "ожидался", dotenv.Candidates(cwd(), config.DataDir()))
 	}
 
-	profile, personaNote, err := persona.Load(cfg.Persona.File)
+	// Язык персоны (этап 10) выбирает и файл характера (встроенный ru/en),
+	// и язык всех промптов, и голос со STT: одно поле в конфиге — вся Мира
+	// меняет язык целиком. Явный persona.file перекрывает только характер,
+	// язык всё равно берётся из конфига.
+	profile, personaNote, err := persona.LoadFor(cfg.Persona.File, cfg.Avatar.Language)
 	if err != nil {
 		return err
 	}
-	log.Info(personaNote)
+	log.Info(personaNote, "язык", profile.Language)
 
 	// Имя в окне берём из характера: переименовал персонажа в его файле —
 	// подпись в окне меняется вместе с ним, а не остаётся старой из конфига.
@@ -209,9 +214,10 @@ func run() error {
 		QuietToHour:   cfg.Proactive.QuietToHour,
 	})
 	// Озвучка (этап 7): Edge TTS через CLI. Отсутствие edge-tts — не ошибка
-	// запуска: озвучка опциональна, и об этом говорит лог.
+	// запуска: озвучка опциональна, и об этом говорит лог. Голос по умолчанию
+	// следует языку персоны (этап 10), конфиг voice.edge_voice перекрывает.
 	voiceSvc := tts.New(log, cfg.Voice.Enabled, cfg.Voice.EdgeVoice, cfg.Voice.Speed,
-		filepath.Join(filepath.Dir(cfg.Paths.StateFile), "tts"))
+		filepath.Join(filepath.Dir(cfg.Paths.StateFile), "tts"), profile.Language)
 	if voiceSvc.Available() {
 		hub.SetVoice(&server.VoiceInfo{Available: true, Engine: "edge-tts", Voice: voiceSvc.Voice()})
 	}
@@ -220,7 +226,7 @@ func run() error {
 	// Распознавание локальное: запись с микрофона расшифровывается на этой
 	// машине и никуда не уходит (в отличие от TTS, где текст летит в Microsoft).
 	sttSvc := stt.New(log, cfg.STT.Enabled, cfg.STT.ModelDir,
-		filepath.Join(filepath.Dir(cfg.Paths.StateFile), "stt"))
+		filepath.Join(filepath.Dir(cfg.Paths.StateFile), "stt"), profile.Language)
 	if sttSvc.Available() {
 		hub.SetSTT(&server.STTInfo{Available: true, Engine: "faster-whisper"})
 	}

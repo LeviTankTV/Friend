@@ -8,7 +8,7 @@
 # Так цепочка не зависит от pyav: на этой машине его версия несовместима с
 # faster-whisper (av.open без metadata_errors), а для своего формата он и не нужен.
 #
-# Аргументы: папка_модели запись.wav
+# Аргументы: папка_модели запись.wav [язык]   (язык по умолчанию — ru)
 # Вывод: одна строка JSON {"text": "..."} — текст без разметки, пустой если
 # речи в записи не было.
 import json
@@ -36,10 +36,11 @@ def read_pcm16_mono(wav_path: str) -> np.ndarray:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print(json.dumps({"error": "нужны аргументы: модель и wav"}))
+    if len(sys.argv) not in (3, 4):
+        print(json.dumps({"error": "нужны аргументы: модель, wav и (необязательно) язык"}))
         return 2
     model_dir, wav_path = sys.argv[1], sys.argv[2]
+    language = sys.argv[3] if len(sys.argv) == 4 else "ru"
     try:
         audio = read_pcm16_mono(wav_path)
         if audio.size < 1600:  # меньше десятой секунды — не речь, не гоняем модель
@@ -50,7 +51,7 @@ def main() -> int:
         model = WhisperModel(model_dir, device="cpu", compute_type="int8")
         segments, _info = model.transcribe(
             audio,
-            language="ru",
+            language=language,
             beam_size=1,
             vad_filter=True,  # тишину не расшифровываем — она не текст
         )

@@ -25,6 +25,9 @@ import (
 //go:embed mira.json
 var embeddedDefault []byte
 
+//go:embed mira.en.json
+var embeddedEnglish []byte
+
 // Example — пример речи: как она отвечает в похожей ситуации. Показывается
 // модели прямо в системном промпте: примеры держат тон лучше, чем описание тона.
 type Example struct {
@@ -60,12 +63,63 @@ func Default() (Profile, error) {
 	return p, nil
 }
 
+// DefaultFor — встроенный характер по языку (этап 10): «en» — английская
+// Mira (mira.en.json), всё остальное — русский файл.
+func DefaultFor(lang string) (Profile, error) {
+	var raw []byte
+	if strings.EqualFold(strings.TrimSpace(lang), "en") {
+		raw = embeddedEnglish
+	} else {
+		raw = embeddedDefault
+	}
+	var p Profile
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Profile{}, fmt.Errorf("встроенный характер не читается: %w", err)
+	}
+	return p, nil
+}
+
 // EmbeddedJSON отдаёт встроенный файл характера как есть — для команды
 // -dump-persona: человек копирует его к себе и правит, ничего не пересобирая.
 func EmbeddedJSON() []byte {
 	out := make([]byte, len(embeddedDefault))
 	copy(out, embeddedDefault)
 	return out
+}
+
+// EmbeddedJSONFor — то же по языку (этап 10): -dump-persona=en отдаёт
+// английский характер.
+func EmbeddedJSONFor(lang string) []byte {
+	if strings.EqualFold(strings.TrimSpace(lang), "en") {
+		out := make([]byte, len(embeddedEnglish))
+		copy(out, embeddedEnglish)
+		return out
+	}
+	return EmbeddedJSON()
+}
+
+// LoadFor читает характер по языку (этап 10): явный путь перекрывает всё,
+// иначе берётся встроенный файл для языка персоны («en» — mira.en.json).
+// Поле language профиля приравнивается к lang: конфиг — единственный
+// источник правды о языке, файл характера может оказаться любым.
+func LoadFor(path, lang string) (Profile, string, error) {
+	if lang != "en" {
+		lang = "ru"
+	}
+	var p Profile
+	var note string
+	var err error
+	if strings.TrimSpace(path) != "" {
+		p, note, err = Load(path)
+	} else {
+		p, err = DefaultFor(lang)
+		note = "характер: встроенный (" + p.Name + ", " + lang + ")"
+	}
+	if err != nil {
+		return Profile{}, "", err
+	}
+	p.Language = lang
+	return p, note, nil
 }
 
 // Load читает характер: явный путь, иначе встроенный.

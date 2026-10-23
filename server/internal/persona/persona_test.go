@@ -192,3 +192,52 @@ func TestEmptyPathUsesEmbedded(t *testing.T) {
 		t.Fatalf("неожиданный результат: имя=%q пояснение=%q", p.Name, note)
 	}
 }
+
+// Этап 10: английская Mira — встроенный файл по языку, промпт собирается
+// целиком по-английски, LoadFor приравнивает language к конфигу.
+func TestEnglishProfile(t *testing.T) {
+	p, err := DefaultFor("en")
+	if err != nil {
+		t.Fatalf("английский характер не читается: %v", err)
+	}
+	if p.Name != "Mira" || p.Language != "en" {
+		t.Fatalf("неожиданная личность: %+v", p.Name)
+	}
+	if len(p.Examples) == 0 || len(p.Rules) == 0 {
+		t.Fatal("английский характер без примеров/правил — он не соберёт тон")
+	}
+	prompt := p.SystemPrompt(time.Date(2026, 10, 23, 8, 0, 0, 0, time.UTC))
+	for _, want := range []string{"You are Mira.", "morning", "Examples of your speech", "Hard rules:"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("в английском промпте нет %q:\n%s", want, prompt)
+		}
+	}
+	// Русские слова пролога в английском промпте быть не должны: половина
+	// промпта на одном языке, половина на другом — модель путается в роде.
+	for _, unwanted := range []string{"Ты —", "Как ты говоришь", "Запреты"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("в английском промпте русский кусок %q:\n%s", unwanted, prompt)
+		}
+	}
+}
+
+func TestLoadForPinsLanguage(t *testing.T) {
+	// Пользовательский файл характера мог остаться с language из старого
+	// файла — язык назначает конфиг.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "my.json")
+	own := `{"name":"Яся","language":"ru"}`
+	if err := os.WriteFile(file, []byte(own), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := LoadFor(file, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Language != "en" {
+		t.Fatalf("язык из конфига должен побеждать: %q", p.Language)
+	}
+	if p, _, _ := LoadFor("", "en"); p.Name != "Mira" || p.Language != "en" {
+		t.Fatalf("встроенный en-характер: %+v", p.Name)
+	}
+}

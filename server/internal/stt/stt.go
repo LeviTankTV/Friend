@@ -35,17 +35,22 @@ type Service struct {
 	python string // путь к python ("" = недоступен)
 	script string // файл скрипта в кэше
 	model  string
+	lang   string // язык распознавания (ru/en, этап 10)
 	log    *slog.Logger
 }
 
 // New собирает службу. Проверяет дёшево: python в PATH, модель на диске.
 // Сам faster-whisper пробуется при первом распознавании: отсутствие пакета
-// видно как понятная ошибка запроса.
-func New(log *slog.Logger, enabled bool, modelDir, scriptDir string) *Service {
+// видно как понятная ошибка запроса. lang — язык речи человека (язык
+// персоны из конфига); пустой — русский.
+func New(log *slog.Logger, enabled bool, modelDir, scriptDir, lang string) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Service{model: strings.TrimSpace(modelDir), log: log}
+	s := &Service{model: strings.TrimSpace(modelDir), lang: strings.TrimSpace(lang), log: log}
+	if s.lang != "en" {
+		s.lang = "ru"
+	}
 	if !enabled {
 		return s
 	}
@@ -101,7 +106,7 @@ func (s *Service) Recognize(ctx context.Context, wavPath string) (string, error)
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, s.python, s.script, s.model, wavPath).Output()
+	out, err := exec.CommandContext(ctx, s.python, s.script, s.model, wavPath, s.lang).Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("распознавание не успело за 60 с")

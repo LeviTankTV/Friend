@@ -41,7 +41,7 @@ func TestSynthProducesCachedFile(t *testing.T) {
 	t.Setenv("PATH", fake)
 	cache := t.TempDir()
 
-	s := New(quietLog(), true, "ru-RU-SvetlanaNeural", "+0%", cache)
+	s := New(quietLog(), true, "ru-RU-SvetlanaNeural", "+0%", cache, "ru")
 	if !s.Available() {
 		t.Fatal("edge-tts из PATH должен быть доступен")
 	}
@@ -110,11 +110,11 @@ func TestDisabledAndMissing(t *testing.T) {
 	fake := t.TempDir()
 	fakeCLI(t, fake)
 	t.Setenv("PATH", fake)
-	if s := New(quietLog(), false, "", "", t.TempDir()); s.Available() {
+	if s := New(quietLog(), false, "", "", t.TempDir(), "ru"); s.Available() {
 		t.Fatal("выключенная озвучка не должна быть доступна")
 	}
 	t.Setenv("PATH", t.TempDir()) // каталог без edge-tts
-	if s := New(quietLog(), true, "", "", t.TempDir()); s.Available() {
+	if s := New(quietLog(), true, "", "", t.TempDir(), "ru"); s.Available() {
 		t.Fatal("без edge-tts в PATH озвучка обязана честно быть недоступной")
 	}
 }
@@ -123,8 +123,22 @@ func TestEmptyTextRejected(t *testing.T) {
 	fake := t.TempDir()
 	fakeCLI(t, fake)
 	t.Setenv("PATH", fake)
-	s := New(quietLog(), true, "v", "+0%", t.TempDir())
+	s := New(quietLog(), true, "v", "+0%", t.TempDir(), "ru")
 	if _, err := s.Synth(context.Background(), "   ", 0, 0); err == nil {
 		t.Fatal("пустой текст озвучивать нельзя")
+	}
+}
+
+// Этап 10: пустой голос выбирается по языку персоны — русский Svetlana,
+// английский Jenny; явный голос конфига перекрывает любой.
+func TestVoiceByLanguage(t *testing.T) {
+	if s := New(quietLog(), false, "", "", "", "en"); s.voice != "en-US-JennyNeural" {
+		t.Fatalf("английский голос по умолчанию: %q", s.voice)
+	}
+	if s := New(quietLog(), false, "", "", "", "ru"); s.voice != "ru-RU-SvetlanaNeural" {
+		t.Fatalf("русский голос по умолчанию: %q", s.voice)
+	}
+	if s := New(quietLog(), false, "en-US-AriaNeural", "", "", "ru"); s.voice != "en-US-AriaNeural" {
+		t.Fatal("явный голос конфига обязан побеждать язык")
 	}
 }

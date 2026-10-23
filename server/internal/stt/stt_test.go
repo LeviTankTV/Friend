@@ -59,7 +59,7 @@ func TestChainWithRealWhisper(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	s := New(quietLog(), true, model, dir)
+	s := New(quietLog(), true, model, dir, "ru")
 	if !s.Available() {
 		t.Fatal("при python + модели служба обязана быть доступна")
 	}
@@ -75,12 +75,12 @@ func TestChainWithRealWhisper(t *testing.T) {
 }
 
 func TestUnavailableGracefully(t *testing.T) {
-	if s := New(quietLog(), false, t.TempDir(), t.TempDir()); s.Available() {
+	if s := New(quietLog(), false, t.TempDir(), t.TempDir(), "ru"); s.Available() {
 		t.Fatal("выключенный ввод не должен быть доступен")
 	}
 	// Модель отсутствует (нет model.bin) — даже с python служба недоступна.
 	if _, err := exec.LookPath("python"); err == nil {
-		if s := New(quietLog(), true, filepath.Join(t.TempDir(), "нет-такой"), t.TempDir()); s.Available() {
+		if s := New(quietLog(), true, filepath.Join(t.TempDir(), "нет-такой"), t.TempDir(), "ru"); s.Available() {
 			t.Fatal("без модели на диске ввод обязан быть недоступен")
 		}
 	}

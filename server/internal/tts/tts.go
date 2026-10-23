@@ -43,13 +43,20 @@ type Service struct {
 
 // New собирает службу. enabled=false или отсутствие edge-tts в PATH —
 // Service остаётся нерабочим, и это не ошибка запуска: озвучка опциональна.
-func New(log *slog.Logger, enabled bool, voice, speed, cacheDir string) *Service {
+// Пустой голос выбирается по языку персоны (этап 10): русский — Svetlana,
+// английский — JennyNeural (тёплый разговорный женский; поменять можно
+// конфигом voice.edge_voice — живое прослушивание за человеком).
+func New(log *slog.Logger, enabled bool, voice, speed, cacheDir, lang string) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	s := &Service{voice: strings.TrimSpace(voice), speed: strings.TrimSpace(speed), cache: cacheDir, log: log}
 	if s.voice == "" {
-		s.voice = "ru-RU-SvetlanaNeural"
+		if strings.EqualFold(strings.TrimSpace(lang), "en") {
+			s.voice = "en-US-JennyNeural"
+		} else {
+			s.voice = "ru-RU-SvetlanaNeural"
+		}
 	}
 	if s.speed == "" {
 		s.speed = "+0%"
