@@ -140,9 +140,10 @@ let lastFocusData = null;  // последнее окно от помощник�
 let selftestTarget = null;
 
 function ensureFocusWatch(selftest) {
-  // Помощник есть на Windows (user32) и Linux (X11, см. collect_linux.go);
-  // на macOS его нет — персонаж работает без «понимания экрана».
-  if (process.platform !== 'win32' && process.platform !== 'linux') return;
+  // Помощник есть на Windows (user32), Linux (X11, collect_linux.go) и
+  // macOS (NSWorkspace через osascript, collect_darwin.go — без заголовков
+  // и границ окна, их даёт только Accessibility-разрешение).
+  if (process.platform !== 'win32' && process.platform !== 'linux' && process.platform !== 'darwin') return;
   const bin = [
     path.join(__dirname, '..', 'bin', binName('focuswatch')),
     path.join(__dirname, '..', 'server', binName('focuswatch')),

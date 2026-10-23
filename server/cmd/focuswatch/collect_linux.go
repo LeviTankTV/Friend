@@ -20,14 +20,7 @@ import (
 // печатает одну строку с ясной причиной и выходит (окно работает без
 // «понимания экрана», сервер просто не получает кадров focus).
 
-const HEARTBEAT = 30 * time.Second
-
-type sample struct {
-	Process string   `json:"process"`
-	Title   string   `json:"title"`
-	Idle    int      `json:"idle,omitempty"`
-	Bounds  [4]int   `json:"bounds,omitempty"`
-}
+// sample и HEARTBEAT — общие для платформ, живут в main.go.
 
 func collect(d time.Duration) int {
 	// Закрытие stdin (оболочка умерла) — выходим, как на Windows.
