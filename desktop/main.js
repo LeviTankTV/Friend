@@ -16,6 +16,13 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
+
+// binName — имя бинаря с суффиксом ОСи: Go на Windows собирает *.exe, на
+// Linux/macOS — без суффикса. Сервер и оба помощника зовутся одинаково.
+function binName(name) {
+  return process.platform === 'win32' ? name + '.exe' : name;
+}
 
 const DEV = process.argv.includes('--dev');
 // Самопроверка оболочки: прогон перетаскивания без человека (см. runSelfTest).
@@ -133,16 +140,16 @@ let lastFocusData = null;  // последнее окно от помощник�
 let selftestTarget = null;
 
 function ensureFocusWatch(selftest) {
-  // Помощник есть только на Windows (на других системах активное окно — другие
-  // API); персонаж при этом работает как раньше, просто без «понимания экрана».
-  if (process.platform !== 'win32') return;
+  // Помощник есть на Windows (user32) и Linux (X11, см. collect_linux.go);
+  // на macOS его нет — персонаж работает без «понимания экрана».
+  if (process.platform !== 'win32' && process.platform !== 'linux') return;
   const bin = [
-    path.join(__dirname, '..', 'bin', 'focuswatch.exe'),
-    path.join(__dirname, '..', 'server', 'focuswatch.exe'),
+    path.join(__dirname, '..', 'bin', binName('focuswatch')),
+    path.join(__dirname, '..', 'server', binName('focuswatch')),
   ].find((p) => fs.existsSync(p));
   if (!bin) {
     console.log('[friend] focuswatch нет — компаньон работает без понимания окна ' +
-      '(сборка: cd server && go build -o ..\\bin\\focuswatch.exe ./cmd/focuswatch)');
+      '(сборка: cd server && go build -o ../bin/' + binName('focuswatch') + ' ./cmd/focuswatch)');
     return;
   }
   focusStopping = false;
@@ -196,9 +203,10 @@ function stopFocusWatch() {
 
 // --- Уровень звука на колонках (soundwatch) --------------------------------
 //
-// Для «танцует под музыку» (этап «реакция на звук»): помощник soundwatch.exe
-// читает системный микшер (WASAPI loopback) и печатает в stdout ровно
-// {"level":RMS}. Оболочка пересылает строку странице (js/music.js).
+// Для «танцует под музыку» (этап «реакция на звук»): помощник soundwatch
+// читает системный микшер (WASAPI loopback на Windows, монитор PulseAudio
+// на Linux) и печатает в stdout ровно {"level":RMS}. Оболочка пересылает
+// строку странице (js/music.js).
 // Граница приватности: из звукового сигнала наружу уходит ОДНО число —
 // содержимое звука нигде не сохраняется и никуда, кроме локальной страницы,
 // не отправляется. Помощник живёт только пока включён «танец» (меню).
@@ -212,14 +220,16 @@ let soundRestartTimer = null;
 let soundLines = 0;         // сколько уровней дошло (видно самопроверке)
 
 function ensureSoundWatch() {
-  if (process.platform !== 'win32') return null;
+  // WASAPI-петля — Windows; монитор PulseAudio — Linux (и PipeWire через
+  // pipewire-pulse); на macOS системного loopback нет — танца нет.
+  if (process.platform !== 'win32' && process.platform !== 'linux') return null;
   const bin = [
-    path.join(__dirname, '..', 'bin', 'soundwatch.exe'),
-    path.join(__dirname, '..', 'server', 'soundwatch.exe'),
+    path.join(__dirname, '..', 'bin', binName('soundwatch')),
+    path.join(__dirname, '..', 'server', binName('soundwatch')),
   ].find((p) => fs.existsSync(p));
   if (!bin) {
     console.log('[friend] soundwatch нет — танец под музыку недоступен ' +
-      '(сборка: cd server && go build -o ..\\bin\\soundwatch.exe ./cmd/soundwatch)');
+      '(сборка: cd server && go build -o ../bin/' + binName('soundwatch') + ' ./cmd/soundwatch)');
     return null;
   }
   soundStopping = false;
@@ -404,12 +414,47 @@ function trayRefreshIcon() {
   });
 }
 
-// Автозапуск: штатный механизм Windows — ключ реест HKCU\...\CurrentVersion\Run,
-// его Electron умеет писать сам (setLoginItemSettings). Команда запуска:
-// тот же electron.exe с папкой приложения — то есть ровно тот же старт, что
-// делает start.bat, только без окна консоли. Сработает и при запуске из
-// самопроверки: там Electron тот же, папка та же.
+// Автозапуск: на Windows — ключ реестра HKCU\...\CurrentVersion\Run, его
+// Electron умеет писать сам (setLoginItemSettings); на macOS — тот же
+// механизм Electron. На Linux setLoginItemSettings не работает: пишем файл
+// XDG Autostart ~/.config/autostart/friend.desktop (понимают GNOME, KDE,
+// Cinnamon, XFCE). Команда запуска везде — тот же Electron с папкой
+// приложения, то есть ровно тот же старт, что делает start.bat/start.sh,
+// только без окна консоли.
+function autostartDesktopPath() {
+  const cfg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(cfg, 'autostart', 'friend.desktop');
+}
+
+function autostartApplyLinux(on) {
+  const file = autostartDesktopPath();
+  try {
+    if (on) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      // .desktop Exec: аргументы через пробел, аргумент с пробелами — в
+      // двойных кавычках (JSON.stringify даёт ровно их).
+      const exec = [process.execPath, __dirname].map((s) => JSON.stringify(s)).join(' ');
+      fs.writeFileSync(file, [
+        '[Desktop Entry]',
+        'Type=Application',
+        'Name=Friend',
+        'Exec=' + exec,
+        'X-GNOME-Autostart-enabled=true',
+        'Terminal=false',
+        '',
+      ].join('\n'));
+    } else if (fs.existsSync(file)) {
+      fs.unlinkSync(file);
+    }
+    return true;
+  } catch (err) {
+    console.error('[friend] автозапуск не применился: ' + err.message);
+    return false;
+  }
+}
+
 function autostartApply(on) {
+  if (process.platform === 'linux') return autostartApplyLinux(on);
   try {
     app.setLoginItemSettings({
       openAtLogin: !!on,
@@ -427,6 +472,13 @@ function autostartApply(on) {
 // должна совпасть с той командой, которую спрашивают — путь и те же args,
 // что писали. Прочитать без args — увидеть false при включённом запуске.
 function autostartRead() {
+  if (process.platform === 'linux') {
+    try {
+      return fs.existsSync(autostartDesktopPath());
+    } catch (_err) {
+      return false;
+    }
+  }
   try {
     return app.getLoginItemSettings({ args: [__dirname] }).openAtLogin === true;
   } catch (_err) {

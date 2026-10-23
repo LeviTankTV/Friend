@@ -13,12 +13,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -242,10 +239,5 @@ func (w *wasapi) level() (float64, bool, error) {
 	return 0, false, nil
 }
 
-// printLevel — JSON-строка уровня; строку читает оболочка и передаёт странице.
-func printLevel(v float64) {
-	b, _ := json.Marshal(map[string]float64{"level": math.Round(v*10000) / 10000})
-	os.Stdout.Write(append(b, '\n'))
-}
-
-var _ = time.Second
+// newSource — источник звука на этой ОСи (см. main.go, interface source).
+func newSource() source { return &wasapi{} }
