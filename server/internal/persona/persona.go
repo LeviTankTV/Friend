@@ -18,6 +18,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"friend/internal/i18n"
 )
 
 //go:embed mira.json
@@ -127,33 +129,41 @@ func PartOf(t time.Time) DayPart {
 	}
 }
 
-// Label — как называть часть суток в промпте.
-func (p DayPart) Label() string {
+// Label — как называть часть суток в промпте (русский; для других языков —
+// LabelIn, этап 10).
+func (p DayPart) Label() string { return p.LabelIn(&i18n.RU) }
+
+// LabelIn — название части суток на языке словаря.
+func (p DayPart) LabelIn(d *i18n.Dict) string {
 	switch p {
 	case Morning:
-		return "утро"
+		return d.DayLabelMorning
 	case Day:
-		return "день"
+		return d.DayLabelDay
 	case Evening:
-		return "вечер"
+		return d.DayLabelEvening
 	default:
-		return "ночь"
+		return d.DayLabelNight
 	}
 }
 
-// Tone — как звучать в эту часть суток. Это не «вежливость», а причина: утром
-// человек разгоняется, ночью он уставший — и разговор в 3 часа ночи не должен
-// быть таким же бодрым, как в 10 утра.
-func (p DayPart) Tone() string {
+// Tone — как звучать в эту часть суток (русский; для других языков — ToneIn).
+// Это не «вежливость», а причина: утром человек разгоняется, ночью он
+// уставший — и разговор в 3 часа ночи не должен быть таким же бодрым, как в
+// 10 утра.
+func (p DayPart) Tone() string { return p.ToneIn(&i18n.RU) }
+
+// ToneIn — тон части суток на языке словаря.
+func (p DayPart) ToneIn(d *i18n.Dict) string {
 	switch p {
 	case Morning:
-		return "бодро и коротко: утро, человек только просыпается. Планы, а не разбор дел."
+		return d.DayToneMorning
 	case Day:
-		return "по делу и мягко: он занят. Короткая реплика, никаких длинных монологов."
+		return d.DayToneDay
 	case Evening:
-		return "тепло и расслабленно: можешь спросить, как прошёл день, и поболтать."
+		return d.DayToneEvening
 	default:
-		return "тихо и совсем коротко: ночь. Никаких вопросов, на которые надо думать, и не буди, если человек сам не написал."
+		return d.DayToneNight
 	}
 }
 
@@ -165,30 +175,31 @@ func (p DayPart) Tone() string {
 func (p Profile) SystemPrompt(t time.Time) string {
 	var b strings.Builder
 	part := PartOf(t)
+	d := i18n.For(p.Language)
 
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		name = "Мира"
 	}
-	fmt.Fprintf(&b, "Ты — %s. ", name)
+	fmt.Fprintf(&b, d.PIntro, name)
 	if role := strings.TrimSpace(p.Role); role != "" {
 		b.WriteString(role)
 		b.WriteString(" ")
 	}
-	b.WriteString("Ты живёшь поверх окон на рабочем столе человека и разговариваешь с ним.\n")
+	b.WriteString(d.PLives)
 
 	if tone := strings.TrimSpace(p.Tone); tone != "" {
-		fmt.Fprintf(&b, "\nХарактер: %s\n", tone)
+		fmt.Fprintf(&b, d.PCharacter, tone)
 	}
 
-	if line := genderRule(p.Gender); line != "" {
+	if line := genderRule(d, p.Gender); line != "" {
 		fmt.Fprintf(&b, "\n%s\n", line)
 	}
 
-	fmt.Fprintf(&b, "\nСейчас %s, %s. Как звучать сейчас: %s\n", part.Label(), t.Format("15:04"), part.Tone())
+	fmt.Fprintf(&b, d.PNow, part.LabelIn(d), t.Format("15:04"), part.ToneIn(d))
 
-	if lang := languageName(p.Language); lang != "" {
-		fmt.Fprintf(&b, "Язык: %s.\n", lang)
+	if lang := langName(d, p.Language); lang != "" {
+		fmt.Fprintf(&b, d.PLanguage, lang)
 	}
 
 	writeList := func(title string, items []string) {
@@ -200,47 +211,45 @@ func (p Profile) SystemPrompt(t time.Time) string {
 			fmt.Fprintf(&b, "— %s\n", strings.TrimSpace(it))
 		}
 	}
-	writeList("Как ты говоришь:", p.Style)
-	writeList("Твои привычки:", p.Habits)
-	writeList("Что ты любишь:", p.Likes)
-	writeList("Что тебе не нравится:", p.Dislikes)
+	writeList(d.PStyleTitle, p.Style)
+	writeList(d.PHabitsTitle, p.Habits)
+	writeList(d.PLikesTitle, p.Likes)
+	writeList(d.PDislikeTitle, p.Dislikes)
 
 	if len(p.Examples) > 0 {
-		b.WriteString("\nПримеры твоей речи (тон, а не шаблон):\n")
+		fmt.Fprintf(&b, "\n%s\n", d.PExamplesBody)
 		for _, ex := range p.Examples {
-			fmt.Fprintf(&b, "— Он: %s\n  Ты: %s\n", strings.TrimSpace(ex.User), strings.TrimSpace(ex.Reply))
+			fmt.Fprintf(&b, d.PExamplesPair, strings.TrimSpace(ex.User), strings.TrimSpace(ex.Reply))
 		}
 	}
-	writeList("Запреты:", p.Rules)
+	writeList(d.PRulesTitle, p.Rules)
 
-	b.WriteString("\nОтвечай одной репликой. Не пиши за человека и не описывай свои действия в скобках.")
+	b.WriteString(d.PFinal)
 	return b.String()
 }
 
-// genderRule — прямое указание про род речи.
-//
-// Формулировка нарочно с примерами: модель, которой просто сказать «ты девушка»,
-// всё равно норовит ответить «я пришёл» — род в русском задаётся формами слов,
-// а не описанием.
-func genderRule(g string) string {
+// genderRule — прямое указание про род речи. Формулировка нарочно с
+// примерами: модель, которой просто сказать «ты девушка», всё равно норовит
+// ответить «я пришёл» — род в русском задаётся формами слов, а не описанием.
+func genderRule(d *i18n.Dict, g string) string {
 	switch strings.ToLower(strings.TrimSpace(g)) {
 	case "female", "f", "ж", "женский", "девушка":
-		return "Ты девушка: о себе говори ТОЛЬКО в женском роде — «я пришла», «я рада», «я подумала», «я устала», «я сама», «я готова». Мужской род о себе — грубая ошибка."
+		return d.GenderFemale
 	case "male", "m", "м", "мужской", "парень":
-		return "Ты парень: о себе говори ТОЛЬКО в мужском роде — «я пришёл», «я рад», «я подумал», «я устал», «я сам», «я готов». Женский род о себе — грубая ошибка."
+		return d.GenderMale
 	default:
 		return ""
 	}
 }
 
-// languageName переводит код языка в понятное модели название.
-func languageName(code string) string {
+// langName — строка «Язык: …» на языке словаря.
+func langName(d *i18n.Dict, code string) string {
 	switch strings.ToLower(strings.TrimSpace(code)) {
 	case "", "ru":
-		return "русский: отвечай по-русски"
+		return d.LangNameRu
 	case "en":
-		return "английский: отвечай по-английски"
+		return d.LangNameEn
 	default:
-		return "отвечай на языке человека"
+		return d.LangNameAny
 	}
 }

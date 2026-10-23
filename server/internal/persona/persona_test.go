@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"friend/internal/i18n"
 )
 
 // Встроенный характер обязан читаться и быть похожим на характер, а не на
@@ -173,10 +175,10 @@ func TestGenderRuleInPrompt(t *testing.T) {
 // Мужской пол тоже описан — на случай другого персонажа: правило общее, а не
 // пришитое к Мире.
 func TestMaleRule(t *testing.T) {
-	if got := genderRule("male"); !strings.Contains(got, "мужском роде") {
+	if got := genderRule(&i18n.RU, "male"); !strings.Contains(got, "мужском роде") {
 		t.Errorf("правило для male: %q", got)
 	}
-	if got := genderRule(""); got != "" {
+	if got := genderRule(&i18n.RU, ""); got != "" {
 		t.Errorf("без пола правило не должно ничего добавлять, получено %q", got)
 	}
 }

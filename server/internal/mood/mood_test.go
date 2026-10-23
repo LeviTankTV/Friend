@@ -147,7 +147,7 @@ func TestBand(t *testing.T) {
 }
 
 func TestDescribeNoDigitsHasRule(t *testing.T) {
-	line := Describe(State{Mood: 0.85, Energy: 0.2, Affection: 0.9})
+	line := Describe(State{Mood: 0.85, Energy: 0.2, Affection: 0.9}, "ru")
 	for _, want := range []string{"приподнятое", "усталость", "привязана", "Не пересказывай"} {
 		if !contains(line, want) {
 			t.Fatalf("в описании состояния нет %q: %s", want, line)

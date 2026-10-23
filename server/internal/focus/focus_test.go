@@ -88,7 +88,7 @@ func TestLineForKnownApp(t *testing.T) {
 		Kind:    KindCode,
 		Label:   "GoLand (IDE для Go)",
 		Since:   now.Add(-2*time.Hour - 15*time.Minute),
-	}, now)
+	}, now, "ru")
 	for _, want := range []string{
 		"GoLand (IDE для Go)",
 		"main.go — GoLand",
@@ -104,10 +104,10 @@ func TestLineForKnownApp(t *testing.T) {
 
 func TestLineSilentForDeskAndOwnWindow(t *testing.T) {
 	now := time.Now()
-	if line := Line(Snapshot{Process: "explorer.exe", Kind: KindNone}, now); line != "" {
+	if line := Line(Snapshot{Process: "explorer.exe", Kind: KindNone}, now, "ru"); line != "" {
 		t.Fatalf("рабочий стол не строка контекста: %q", line)
 	}
-	if line := Line(Snapshot{Process: "electron.exe", Kind: KindCompanion}, now); line != "" {
+	if line := Line(Snapshot{Process: "electron.exe", Kind: KindCompanion}, now, "ru"); line != "" {
 		t.Fatalf("окно самой Миры не строка контекста: %q", line)
 	}
 }
@@ -115,18 +115,18 @@ func TestLineSilentForDeskAndOwnWindow(t *testing.T) {
 func TestLineNoFakeMinutes(t *testing.T) {
 	// «уже 30 секунд» звучит слежкой; минуты упоминаем только от одной.
 	now := time.Now()
-	line := Line(Snapshot{Process: "chrome.exe", Kind: KindBrowser, Label: "Chrome (браузер)", Since: now.Add(-30 * time.Second)}, now)
+	line := Line(Snapshot{Process: "chrome.exe", Kind: KindBrowser, Label: "Chrome (браузер)", Since: now.Add(-30 * time.Second)}, now, "ru")
 	if strings.Contains(line, "уже") {
 		t.Fatalf("меньше минуты упоминать незачем: %q", line)
 	}
-	line = Line(Snapshot{Process: "chrome.exe", Kind: KindBrowser, Label: "Chrome (браузер)", Since: now.Add(-90 * time.Minute)}, now)
+	line = Line(Snapshot{Process: "chrome.exe", Kind: KindBrowser, Label: "Chrome (браузер)", Since: now.Add(-90 * time.Minute)}, now, "ru")
 	if !strings.Contains(line, "уже 1 ч 30 мин") {
 		t.Fatalf("полтора часа читаются как «1 ч 30 мин»: %q", line)
 	}
 }
 
 func TestLineUnknownAppForbidsGuessing(t *testing.T) {
-	line := Line(Snapshot{Process: "shaper.exe", Kind: KindOther, Label: "shaper", Since: time.Now().Add(-time.Hour)}, time.Now())
+	line := Line(Snapshot{Process: "shaper.exe", Kind: KindOther, Label: "shaper", Since: time.Now().Add(-time.Hour)}, time.Now(), "ru")
 	if !strings.Contains(line, "не выдумывай") {
 		t.Fatalf("о неизвестном приложении промпт обязан запретить догадки: %q", line)
 	}

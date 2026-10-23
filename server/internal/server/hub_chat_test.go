@@ -122,16 +122,16 @@ func TestSayCarriesUserState(t *testing.T) {
 	for {
 		f := recv(t, conn)
 		if f["type"] == TypeReply {
-			if f["user_state"] != "расстроился" {
+			if f["user_state"] != "sad" {
 				t.Fatalf("кадр ответа без ярлыка тона: %v", f)
 			}
 			break
 		}
 	}
-	if got := resp.askedStates(); len(got) != 1 || got[0] != "расстроился" {
-		t.Errorf("компаньону ушло состояние %v, ожидался «расстроился»", got)
+	if got := resp.askedStates(); len(got) != 1 || got[0] != "sad" {
+		t.Errorf("компаньону ушло состояние %v, ожидался код sad", got)
 	}
-	if hub.UserState() != "расстроился" {
+	if hub.UserState() != "sad" {
 		t.Errorf("ярлык живёт до следующей реплики, получили %q", hub.UserState())
 	}
 

@@ -27,8 +27,12 @@ import (
 	"time"
 
 	"friend/internal/focus"
+	"friend/internal/i18n"
 	"friend/internal/persona"
 )
+
+// d — словарь языка персоны из входа тика (этап 10).
+func d(in Inputs) *i18n.Dict { return i18n.For(in.Language) }
 
 // Kind — какой триггер сработал. Нужен вызывающему: после ОТПРАВЛЕННОЙ
 // реплики он отмечает именно этот факт (у «иди спать» и «два часа в GoLand»
@@ -97,6 +101,8 @@ type Inputs struct {
 	// Focus — активное окно (см. internal/focus). ok=false — данных нет.
 	Focus    focus.Snapshot
 	HasFocus bool
+	// Language — язык персоны (этап 10): на нём собираются тексты поводов.
+	Language string
 }
 
 // Event — сработавший повод. Reason — короткий текст-установка для модели
@@ -267,10 +273,7 @@ func (s *Scheduler) night(in Inputs) (Event, bool) {
 	if !present(in) {
 		return Event{}, false // ритуал — тому, кто ещё бодрствует рядом
 	}
-	return Event{Kind: KindNight, Reason: fmt.Sprintf(
-		"Глубокая ночь, сейчас %s. Он всё ещё не ложится. Скажи ОДНУ короткую тёплую "+
-			"фразу от себя: ты сама уже засыпаешь и ты рядом с ним — «пора спать, я рядом». "+
-			"Не читай мораль и не уговаривай второй раз.", in.Now.Format("15:04"))}, true
+	return Event{Kind: KindNight, Reason: fmt.Sprintf(d(in).NightReason, in.Now.Format("15:04"))}, true
 }
 
 // sleep — «иди спать». Разрешена в окно тишины: смысл реплики именно в том,
@@ -290,10 +293,7 @@ func (s *Scheduler) sleep(in Inputs) (Event, bool) {
 	if !present(in) {
 		return Event{}, false // «иди спать» говорят тому, кто не спит, а не пустоте
 	}
-	return Event{Kind: KindSleep, Reason: fmt.Sprintf(
-		"Сейчас %s, он до сих пор бодрствует. Скажи ОДНУ короткую фразу от себя: "+
-			"ты уже устала, и мягко уговори его пойти спать. Не читай мораль.",
-		in.Now.Format("15:04"))}, true
+	return Event{Kind: KindSleep, Reason: fmt.Sprintf(d(in).SleepReason, in.Now.Format("15:04"))}, true
 }
 
 // idle — он пропал: не трогает мышь. Она засыпает у него на рабочем столе.
@@ -310,10 +310,7 @@ func (s *Scheduler) idle(in Inputs) (Event, bool) {
 		return Event{}, false
 	}
 	minutes := int(idle.Minutes())
-	return Event{Kind: KindIdle, Reason: fmt.Sprintf(
-		"Он не трогает мышь уже %d минут — похоже, его нет рядом. Ты тихо засыпаешь "+
-			"на рабочем столе: ОДНА короткая сонная реплика, как зевка. Не зови его "+
-			"и не жди ответа.", minutes)}, true
+	return Event{Kind: KindIdle, Reason: fmt.Sprintf(d(in).IdleReason, minutes)}, true
 }
 
 // water — пора пить. Порог из конфига (по умолчанию 3 часа); молчит ночью и
@@ -335,9 +332,7 @@ func (s *Scheduler) water(in Inputs) (Event, bool) {
 	if busy(in) {
 		return Event{}, false // «занят → реже»: занятому про воду не напоминать
 	}
-	return Event{Kind: KindWater, Reason: fmt.Sprintf(
-		"Он за компьютером уже %d минут без перерыва. Подтолкни его к стакану воды "+
-			"ОДНОЙ короткой репликой, по-своему, без назидания и без «заботы о здоровье».",
+	return Event{Kind: KindWater, Reason: fmt.Sprintf(d(in).WaterReason,
 		int(in.Now.Sub(s.started).Minutes()))}, true
 }
 
@@ -369,10 +364,7 @@ func (s *Scheduler) care(in Inputs) (Event, bool) {
 		return Event{}, false
 	}
 	hours := int(since.Hours())
-	return Event{Kind: KindCare, Reason: fmt.Sprintf(
-		"Сейчас %s, глубокая ночь, а он в редакторе («%s») уже %d часов подряд. "+
-			"ОДНА короткая мягкая реплика ПРО НЕГО: бережность и предложение передышки — "+
-			"«ты здесь с %s, передышка?». Не приказ, не мораль, не конкурирует с «иди спать».",
+	return Event{Kind: KindCare, Reason: fmt.Sprintf(d(in).CareReason,
 		in.Now.Format("15:04"), in.Focus.Label, hours, in.Focus.Since.Format("15:04"))}, true
 }
 
@@ -394,10 +386,7 @@ func (s *Scheduler) game(in Inputs) (Event, bool) {
 		return Event{}, false
 	}
 	half := int(since.Minutes() / 60)
-	return Event{Kind: KindGame, Reason: fmt.Sprintf(
-		"Он в игре («%s») уже %d с лишним часов. Одна короткая тёплая реплика "+
-			"с улыбкой — поддразнить («опять?»), без упрёка и не звать закрывать.",
-		in.Focus.Label, half)}, true
+	return Event{Kind: KindGame, Reason: fmt.Sprintf(d(in).GameReason, in.Focus.Label, half)}, true
 }
 
 // app — два часа в редакторе кода. Одна реплика на заход в приложение
@@ -416,10 +405,7 @@ func (s *Scheduler) app(in Inputs) (Event, bool) {
 		return Event{}, false
 	}
 	hours := int(in.Now.Sub(in.Focus.Since).Hours())
-	return Event{Kind: KindApp, Reason: fmt.Sprintf(
-		"Он в %s уже %d часов подряд. Одна короткая тёплая реплика про перерыв — "+
-			"чай, передышка, окно в стену. Без упрёка и без «надо бы».",
-		in.Focus.Label, hours)}, true
+	return Event{Kind: KindApp, Reason: fmt.Sprintf(d(in).AppReason, in.Focus.Label, hours)}, true
 }
 
 // editorFact — факт про редактор для ритуальных поводов (этап 9г): если активное
@@ -427,7 +413,7 @@ func (s *Scheduler) app(in Inputs) (Event, bool) {
 // — планировщик только передаёт, что видит.
 func editorFact(in Inputs) string {
 	if in.HasFocus && in.Focus.Kind == focus.KindCode {
-		return "Он уже в редакторе («" + in.Focus.Label + "»)."
+		return fmt.Sprintf(d(in).EditorFact, in.Focus.Label)
 	}
 	return ""
 }
@@ -442,10 +428,9 @@ func (s *Scheduler) morning(in Inputs) (Event, bool) {
 	if !present(in) {
 		return Event{}, false
 	}
-	reason := fmt.Sprintf("Началось утро, сейчас %s. Поздоровайся с ним коротко и бодро — одной репликой, "+
-		"без плана на день и без «высыпался ли».", in.Now.Format("15:04"))
+	reason := fmt.Sprintf(d(in).MorningReason, in.Now.Format("15:04"))
 	if fact := editorFact(in); fact != "" {
-		reason += " " + fact + " Можешь удивиться этому в одном слове."
+		reason += " " + fact + " " + d(in).MorningFact
 	}
 	return Event{Kind: KindMorning, Reason: reason}, true
 }
@@ -457,10 +442,9 @@ func (s *Scheduler) evening(in Inputs) (Event, bool) {
 	if !present(in) {
 		return Event{}, false
 	}
-	reason := fmt.Sprintf("Начался вечер, сейчас %s. Коротко спроси, как у него прошёл день — одной репликой, "+
-		"и не превращай вопрос в анкету.", in.Now.Format("15:04"))
+	reason := fmt.Sprintf(d(in).EveningReason, in.Now.Format("15:04"))
 	if fact := editorFact(in); fact != "" {
-		reason += " " + fact + " Это можно упомянуть в вопросе."
+		reason += " " + fact + " " + d(in).EveningFact
 	}
 	return Event{Kind: KindEvening, Reason: reason}, true
 }
@@ -482,9 +466,7 @@ func (s *Scheduler) silence(in Inputs) (Event, bool) {
 		return Event{}, false
 	}
 	minutes := int(in.Now.Sub(last).Minutes())
-	return Event{Kind: KindSilence, Reason: fmt.Sprintf(
-		"Он рядом, но молчит уже %d минут. Спроси ЕГО лично — «ты тут, всё в "+
-			"порядке?» — тепло и про него, а не «у всех» и не «чем помочь».", minutes)}, true
+	return Event{Kind: KindSilence, Reason: fmt.Sprintf(d(in).SilenceReason, minutes)}, true
 }
 
 // MarkSent отмечает ОТПРАВЛЕННУЮ реплику: она обнуляет отсчёт анти-спама,

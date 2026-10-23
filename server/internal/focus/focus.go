@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"friend/internal/i18n"
 )
 
 // Kind — к какому делу относится приложение. Нужен не для красоты, а для
@@ -271,72 +273,74 @@ func (t *Tracker) Snapshot() (Snapshot, bool) {
 
 // kindHint — как обращаться к человеку, когда он в приложении этого типа.
 // Это не «что он делает» (этого мы не знаем), а как себя вести.
-func kindHint(k Kind) string {
+func kindHint(d *i18n.Dict, k Kind) string {
 	switch k {
 	case KindCode:
-		return "Похоже, он занят делом — не перебивай без нужды."
+		return d.KindHintCode
 	case KindBrowser:
-		return "Он в браузере — что именно он читает, ты не знаешь."
+		return d.KindHintBrowser
 	case KindMessenger:
-		return "Он переписывается — не требуй к себе внимания."
+		return d.KindHintMessenger
 	case KindGame:
-		return "Он играет — не мешай, максимум тихо пожелай удачи."
+		return d.KindHintGame
 	case KindMusic:
-		return "У него играет музыка."
+		return d.KindHintMusic
 	case KindOffice:
-		return "Он за рабочей задачей."
+		return d.KindHintOffice
 	case KindTerminal:
-		return "Он в терминале — скорее всего, что-то собирает или чинит."
+		return d.KindHintTerminal
 	default:
-		return "Что он там делает — не знай и не выдумывай."
+		return d.KindHintOther
 	}
 }
 
 // humanDuration — «уже 2 ч 15 мин» по-человечески. Меньше минуты не упоминаем:
 // «уже 30 секунд» звучит слежкой, а не заботой.
-func humanDuration(d time.Duration) string {
-	if d < time.Minute {
+func humanDuration(d *i18n.Dict, td time.Duration) string {
+	if td < time.Minute {
 		return ""
 	}
-	if d >= 24*time.Hour {
-		return "больше суток"
+	if td >= 24*time.Hour {
+		return d.DurOverDay
 	}
-	min := int(d.Minutes())
+	min := int(td.Minutes())
 	if min < 60 {
-		return fmt.Sprintf("%d мин", min)
+		return fmt.Sprintf(d.DurMinutes, min)
 	}
 	h, m := min/60, min%60
 	if m == 0 {
-		return fmt.Sprintf("%d ч", h)
+		return fmt.Sprintf(d.DurHours, h)
 	}
-	return fmt.Sprintf("%d ч %d мин", h, m)
+	return fmt.Sprintf(d.DurHM, h, m)
 }
 
 // Line — строка контекста для системного промпта: «он сейчас в GoLand
 // (IDE для Go), уже 2 ч — не перебивай». Пустая строка означает «говорить об
 // активном окне нечего»: рабочий стол, окно самой Миры, ничего не пришло.
+// Язык строки — язык персоны (этап 10).
 //
 // Правило запретов здесь, а не в характере: оно про ЧИСТУЮ механику контекста
 // (у нас только имя процесса и заголовок), и менять её из mira.json незачем.
-func Line(s Snapshot, now time.Time) string {
+func Line(s Snapshot, now time.Time, lang string) string {
 	if s.Kind == KindNone || s.Kind == KindCompanion {
 		return ""
 	}
+	d := i18n.For(lang)
 	label := s.Label
 	if label == "" {
 		label = s.Process
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Он сейчас в %s", label)
+	fmt.Fprintf(&b, d.FocusHeIn, label)
 	if s.Title != "" {
-		fmt.Fprintf(&b, " (окно: «%s»)", s.Title)
+		fmt.Fprintf(&b, d.FocusTitle, s.Title)
 	}
-	if dur := humanDuration(now.Sub(s.Since)); dur != "" {
-		fmt.Fprintf(&b, ", уже %s", dur)
+	if dur := humanDuration(d, now.Sub(s.Since)); dur != "" {
+		fmt.Fprintf(&b, d.FocusFor, dur)
 	}
 	b.WriteString(". ")
-	b.WriteString(kindHint(s.Kind))
-	b.WriteString(" Ты знаешь только имя приложения и заголовок окна: содержимое окон не описывай и не угадывай.")
+	b.WriteString(kindHint(d, s.Kind))
+	b.WriteString(d.FocusTail)
 	return b.String()
 }
 

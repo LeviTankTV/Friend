@@ -18,9 +18,11 @@ import (
 	"time"
 
 	"friend/internal/chat"
+	"friend/internal/i18n"
 	"friend/internal/llm"
 	"friend/internal/memory"
 	"friend/internal/mood"
+	"friend/internal/moodread"
 	"friend/internal/persona"
 )
 
@@ -94,11 +96,8 @@ func (c *Companion) SetMoodSource(fn func() mood.State) { c.mood = fn }
 
 // rememberInstruction — как просить модель сжать разговор в саммари (этап 3).
 // Просьба намеренно про человека и его жизнь: так из разговора остаётся то,
-// что пригодится в следующий раз, а не её собственные реплики.
-const rememberInstruction = "Это ваш разговор за последнее время, по хронологии:\n\n%s\n\n" +
-	"Сожми в ОДНУ короткую заметку (1–2 предложения) о НЁМ и его жизни: о чём " +
-	"говорил, что у него происходит, в каком состоянии. Пиши как памятку о " +
-	"человеке, не о себе. Без воды, без оценок, без своей роли."
+// что пригодится в следующий раз, а не её собственные реплики. Текст — в
+// словаре (i18n.SummarizeInstruction), язык следует за персоной.
 
 // Summarize сжимает переданный текст разговора в саммари (заметку о человеке).
 // В историю и архив НЕ попадает: саммари — отдельный слой памяти, его пишет
@@ -114,7 +113,7 @@ func (c *Companion) Summarize(ctx context.Context, convo string) (string, error)
 	prompt := c.profile.SystemPrompt(c.now())
 	msgs := []llm.Message{
 		{Role: "system", Content: prompt},
-		{Role: "user", Content: fmt.Sprintf(rememberInstruction, convo)},
+		{Role: "user", Content: fmt.Sprintf(c.dict().SummarizeInstruction, convo)},
 	}
 	out, err := c.model.Chat(ctx, msgs)
 	if err != nil {
@@ -131,10 +130,7 @@ var ErrEmptyReply = errors.New("нечего отвечать: реплика п
 //
 // Текст нарочно не оставляет модели выбора формата «ответить человеку»:
 // иначе на проактивный повод она отвечает как на реплику («Чем помочь?»).
-const speakInstruction = "Повод: %s\n" +
-	"Заговори первой: это не реплика человека, а обстановка. Ответь ОДНОЙ короткой " +
-	"репликой от себя, как будто он рядом и ты сама решила это сказать. Не сообщай, " +
-	"что тебе что-то «подсказали», и не спрашивай «чем помочь»."
+// Строка — в словаре (i18n.SpeakInstruction), язык следует за персоной.
 
 // Speak — её собственная реплика по поводу (этап 4, инициатива).
 //
@@ -153,7 +149,7 @@ func (c *Companion) Speak(ctx context.Context, reason string) (string, error) {
 	// Долгая память по проактивному поводу та же, что и по реплике
 	// человека: она в системном промпте, её нет в истории.
 	msgs := c.memoryMessages(reason)
-	msgs = append(msgs, llm.Message{Role: "user", Content: fmt.Sprintf(speakInstruction, reason)})
+	msgs = append(msgs, llm.Message{Role: "user", Content: fmt.Sprintf(c.dict().SpeakInstruction, reason)})
 	answer, err := c.model.Chat(ctx, msgs)
 	if err != nil {
 		return "", err
@@ -232,23 +228,24 @@ func (c *Companion) memoryMessages(query string) []llm.Message {
 // (пустой — память не ищем).
 func (c *Companion) messagesWithQuery(query string) []llm.Message {
 	history := c.sess.Messages()
+	d := c.dict()
 	prompt := c.profile.SystemPrompt(c.now())
 	if c.context != nil {
 		if ctx := strings.TrimSpace(c.context()); ctx != "" {
-			prompt += "\n\nОбстановка сейчас: " + ctx
+			prompt += d.CtxHeader + ctx
 		}
 	}
 	if c.mood != nil {
-		if line := mood.Describe(c.mood()); line != "" {
+		if line := mood.Describe(c.mood(), c.profile.Language); line != "" {
 			prompt += "\n\n" + line
 		}
 	}
-	// Эмпатия (этап 9в): ярлык тона реплик человека — одна строка промпта.
-	// Формулировка обязана быть такой, чтобы она ЧУВСТВОВАЛА состояние, а не
-	// допрашивала: «он устал» ≠ «спроси, почему он устал».
+	// Эмпатия (этап 9в): код тона реплик человека (moodread) — одна строка
+	// промпта, слово на языке персоны. Формулировка обязана быть такой,
+	// чтобы она ЧУВСТВОВАЛА состояние, а не допрашивала: «он устал» ≠
+	// «спроси, почему он устал».
 	if s := strings.TrimSpace(c.userState); s != "" {
-		prompt += "\n\nОн сейчас: " + s +
-			" (это твоё собственное наблюдение по тону его сообщений — учти это в тоне ответа; не переспрашивай и не объявляй человеку, что ты его «проанализировала»)."
+		prompt += fmt.Sprintf(d.UserStateLine, usWord(d, s))
 	}
 	if query != "" {
 		prompt += c.memorySection(query)
@@ -261,6 +258,26 @@ func (c *Companion) messagesWithQuery(query string) []llm.Message {
 	return msgs
 }
 
+// dict — словарь языка персоны.
+func (c *Companion) dict() *i18n.Dict { return i18n.For(c.profile.Language) }
+
+// usWord — код тона (moodread.Tired…) в слово промпта на языке словаря.
+func usWord(d *i18n.Dict, code string) string {
+	switch code {
+	case moodread.Tired:
+		return d.USTired
+	case moodread.Sad:
+		return d.USSad
+	case moodread.Happy:
+		return d.USHappy
+	case moodread.Angry:
+		return d.USAngry
+	case moodread.Anxious:
+		return d.USAnxious
+	}
+	return code
+}
+
 // memorySection — кусок промпта с долгой памятью: факты, подходящие к
 // текущей реплике, и последние саммари. Ошибка памяти не должна стоить
 // ответа: промпт просто собирается без этого куска.
@@ -268,20 +285,21 @@ func (c *Companion) memorySection(query string) string {
 	if c.memory == nil {
 		return ""
 	}
+	d := c.dict()
 	out := ""
 	if facts, err := c.memory.Recall(query, 5); err == nil && len(facts) > 0 {
-		out += "\n\nЧто ты помнишь о нём (из его жизни):"
+		out += d.MemFactsHead
 		for _, f := range facts {
 			out += "\n— " + f.Text
 		}
 	}
 	if sum, err := c.memory.Summaries(1); err == nil && len(sum) > 0 {
-		out += "\nВчера и позавчерашний день (саммари разговора): " + sum[0].Text
+		out += fmt.Sprintf(d.MemSummary, sum[0].Text)
 	}
 	if out == "" {
 		return ""
 	}
-	return out + "\nИспользуй это молча, как своё знание: не пересказывай список и не говори «я помню, что ты мне говорил»."
+	return out + d.MemTail
 }
 
 // lastUserText — последняя реплика человека в истории (по ней ищем память).

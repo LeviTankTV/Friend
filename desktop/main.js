@@ -94,6 +94,10 @@ async function ensureServer() {
     let base = {};
     try { base = JSON.parse(fs.readFileSync(userCfg, 'utf8')); } catch (_e) { /* конфига нет — дефолты сервера */ }
     base.proactive = Object.assign({}, base.proactive || {}, { enabled: false });
+    // Язык самопроверки — русский, каким бы ни был пользовательский конфиг
+    // (этап 10): все проверки сверяют русские фразы, они не должны зависеть
+    // от того, на каком языке живёт Мира у человека.
+    base.avatar = Object.assign({}, base.avatar || {}, { language: 'ru' });
     try { fs.writeFileSync(stCfg, JSON.stringify(base)); args.push('-config', stCfg); } catch (_e) {}
   }
   serverProc = spawn(bin, args, {
@@ -2589,7 +2593,7 @@ async function runSelfTest() {
       const t = (ms) => new Promise((r) => setTimeout(r, ms));
       // Механизм: лицо сочувствия применится после речи, через ~6 с вернётся.
       av.setEmotion(av.calmFace());
-      av.reactToUserState('расстроился');
+      av.reactToUserState('sad');
       let sawSad = false;
       for (let k = 0; k < 20 && !sawSad; k++) { await t(150); sawSad = av.emotion() === 'sad'; }
       let backCalm = false;
@@ -2612,7 +2616,7 @@ async function runSelfTest() {
         chain.neutralState = box.reply ? (box.reply.user_state || '') : '';
       }
       av.setEmotion(av.calmFace());
-      const live = chain.key || (chain.state === 'расстроился' && chain.sadFace && chain.neutralState === '');
+      const live = chain.key || (chain.state === 'sad' && chain.sadFace && chain.neutralState === '');
       return {
         ok: sawSad && backCalm && live,
         why: 'механизм ' + (sawSad && backCalm) + ' (грусть ' + sawSad + ' возврат ' + backCalm + ')' +

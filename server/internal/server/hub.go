@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"friend/internal/chat"
 	"friend/internal/config"
 	"friend/internal/focus"
+	"friend/internal/i18n"
 	"friend/internal/llm"
 	"friend/internal/mood"
 	"friend/internal/moodread"
@@ -558,31 +560,33 @@ func (h *Hub) notifyUserTalk() {
 	}
 }
 
-// rememberPrefix — с чего начинается команда запоминания.
-const rememberPrefix = "запомни:"
+// rememberPrefixes — с чего начинается команда запоминания: русский и
+// английский префикс (этап 10), факты пишет любой человек независимо от
+// языка персоны.
+var rememberPrefixes = []string{"запомни:", "remember:"}
 
-// parseRemember — эта реплика команда «запомни: …»? Регистр не важен.
-// Вторая строка — текст факта (может быть пустой: «запомни:» без текста).
+// parseRemember — эта реплика команда «запомни: …» / "remember: …"?
+// Регистр не важен. Вторая строка — текст факта (может быть пустой).
 func parseRemember(text string) (string, bool) {
 	lower := strings.ToLower(strings.TrimSpace(text))
-	if !strings.HasPrefix(lower, rememberPrefix) {
-		return "", false
+	for _, prefix := range rememberPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(text[len(prefix):]), true
+		}
 	}
-	fact := strings.TrimSpace(text[len(rememberPrefix):])
-	return fact, true
+	return "", false
 }
 
 // handleRemember — команда «запомни:»: факт в память, подтверждение в окно.
 // Без ключа модели работает: память локальная, модель здесь не нужна.
 func (h *Hub) handleRemember(c *wsClient, whole, fact string) {
+	d := i18n.For(h.avatar.Language)
 	if h.memory == nil {
-		c.sendTo(ReplyErrorMsg{Type: TypeReplyError,
-			Error: "Память не подключена — «запомни:» сейчас не работает."})
+		c.sendTo(ReplyErrorMsg{Type: TypeReplyError, Error: d.ErrNoMemory})
 		return
 	}
 	if fact == "" {
-		c.sendTo(ReplyErrorMsg{Type: TypeReplyError,
-			Error: "После «запомни:» нужен текст: что именно запомнить."})
+		c.sendTo(ReplyErrorMsg{Type: TypeReplyError, Error: d.ErrEmptyFact})
 		return
 	}
 	now := time.Now()
@@ -595,7 +599,7 @@ func (h *Hub) handleRemember(c *wsClient, whole, fact string) {
 	// И саму команду, и подтверждение кладём в архив разговора: саммари и
 	// восстановление истории видят разговор целиком.
 	_ = h.memory.Archive(chat.RoleUser, whole, now)
-	confirm := "Запомнила: " + fact
+	confirm := fmt.Sprintf(d.ConfirmRemember, fact)
 	_ = h.memory.Archive(chat.RoleAssistant, confirm, now)
 	c.sendTo(ReplyMsg{Type: TypeReply, Text: confirm, At: now.UTC()})
 	h.log.Info("запомнен факт", "знаков", len([]rune(fact)))

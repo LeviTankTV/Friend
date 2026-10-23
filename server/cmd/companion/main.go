@@ -134,7 +134,8 @@ func run() error {
 		if !ok {
 			return ""
 		}
-		return focus.Line(s, time.Now())
+		// Язык строки обстановки — язык персоны (этап 10): промпт цельный.
+		return focus.Line(s, time.Now(), profile.Language)
 	})
 
 	store, err := state.Open(cfg.Paths.StateFile)
@@ -248,7 +249,7 @@ func run() error {
 	comp.SetMoodSource(moodGet)
 
 	go proactiveLoop(ctx, log, sched, comp, hub, sess, tracker, mem, store,
-		moodEvents, moodGet, moodSet, time.Duration(cfg.Proactive.TickSeconds)*time.Second)
+		moodEvents, moodGet, moodSet, time.Duration(cfg.Proactive.TickSeconds)*time.Second, profile.Language)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -313,7 +314,7 @@ func keyHint(m *llm.Client, env dotenv.Result) string {
 func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Scheduler,
 	comp *companion.Companion, hub *server.Hub, sess *chat.Session, tracker *focus.Tracker,
 	mem *memory.Store, store *state.Store, moodEvents <-chan mood.Event,
-	moodGet func() mood.State, moodSet func(mood.State), tick time.Duration) {
+	moodGet func() mood.State, moodSet func(mood.State), tick time.Duration, lang string) {
 	if tick <= 0 {
 		tick = 30 * time.Second
 	}
@@ -385,7 +386,7 @@ func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Sched
 		}
 		prevPart = part
 
-		in := proactive.Inputs{Now: now}
+		in := proactive.Inputs{Now: now, Language: lang}
 		if s, ok := tracker.Snapshot(); ok {
 			in.Focus, in.HasFocus = s, true
 			in.LastInput = s.IdleAt

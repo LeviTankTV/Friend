@@ -15,8 +15,11 @@
 package mood
 
 import (
+	"fmt"
 	"math"
 	"time"
+
+	"friend/internal/i18n"
 )
 
 // State — снимок состояния. Все значения в диапазоне 0..1.
@@ -173,33 +176,31 @@ func Band(st State) string {
 }
 
 // Describe — строка для системного промпта. Цифры модели не показываются:
-// ей нужен тон, а не таблица.
-func Describe(st State) string {
-	mood := "ровное"
+// ей нужен тон, а не таблица. Язык строки — язык персоны (этап 10).
+func Describe(st State, lang string) string {
+	d := i18n.For(lang)
+	mood := d.MoodSteady
 	switch {
 	case st.Mood >= 0.7:
-		mood = "приподнятое"
+		mood = d.MoodHigh
 	case st.Mood < 0.35:
-		mood = "упавшее, грустинка"
+		mood = d.MoodLow
 	}
-	energy := "обычная"
+	energy := d.EnergyNormal
 	switch {
 	case st.Energy >= 0.7:
-		energy = "бодрость"
+		energy = d.EnergyHigh
 	case st.Energy < 0.35:
-		energy = "усталость, сонливость"
+		energy = d.EnergyLow
 	}
-	aff := "ровная"
+	aff := d.AffSteady
 	switch {
 	case st.Affection >= 0.7:
-		aff = "очень привязана к человеку"
+		aff = d.AffHigh
 	case st.Affection < 0.3:
-		aff = "сдержанная, человека знает недавно"
+		aff = d.AffLow
 	}
-	return "Твоё внутреннее состояние сейчас: настроение — " + mood +
-		"; энергия — " + energy + "; отношение к человеку — " + aff + "." +
-		" Это слышно в твоём тоне и длине реплик. Не пересказывай своё состояние" +
-		" цифрами, не считай его вслух и не жалуйся на него — оно просто звучит в речи."
+	return fmt.Sprintf(d.MoodLine, mood, energy, aff)
 }
 
 // Changed — заметно ли состояние сдвинулось (порог: сохранять и показывать

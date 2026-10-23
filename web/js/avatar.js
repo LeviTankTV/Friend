@@ -1471,12 +1471,16 @@ window.FriendAvatar = (function () {
       },
       dancing: function () { return anim.dance; },
       pet: pet,
-      // reactToUserState (этап 9в): ярлык тона сообщений человека
-      // («расстроился», «устал», «рад», «злится», «тревожится») — лицо
-      // сочувствия после её ответа. Ярлык приходит с сервера (локальный
-      // детектор internal/moodread), содержимое сообщений аватар не читает.
+      // reactToUserState (этап 9в): код тона сообщений человека
+      // ("sad", "tired", "happy", "angry", "anxious" — коды internal/moodread,
+      // этап 10) — лицо сочувствия после её ответа. Код приходит с сервера
+      // (локальный детектор), содержимое сообщений аватар не читает.
       reactToUserState: function (label) {
         const faces = {
+          sad: 'sad', tired: 'think', anxious: 'think',
+          angry: 'calm', happy: 'happy',
+          // Русские ярлыки — от сервера до этапа 10: страница бывает новее
+          // бинарника на один прогон.
           'расстроился': 'sad', 'устал': 'think', 'тревожится': 'think',
           'злится': 'calm', 'рад': 'happy',
         };
