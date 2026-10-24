@@ -12,7 +12,8 @@
   },
   "devDependencies": {
     "electron": "^32.2.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "gifenc": "^1.0.3"
   },
   "build": {
     "appId": "dev.friend.companion",
@@ -26,8 +27,14 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "../bin", "to": "bin" },
-      { "from": "../web", "to": "web" }
+      {
+        "from": "../bin",
+        "to": "bin"
+      },
+      {
+        "from": "../web",
+        "to": "web"
+      }
     ],
     "win": {
       "target": "nsis"
@@ -38,7 +45,13 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.lifestyle",
       "extendInfo": {
@@ -46,7 +59,10 @@
       }
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Utility"
     }
   }

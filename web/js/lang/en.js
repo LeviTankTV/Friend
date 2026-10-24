@@ -64,5 +64,8 @@
     'wake.awakePhrase': "Mm? Yes, I'm here.",
     'poke.phrases': ['Hm?', "I'm here.", 'Yes, right here.', 'Hm? What happened?', "It's nice that you notice me.", 'Mhm, listening.'],
     'seat.noWindow': "Nothing to sit on right now — there's no active window.",
+    // Демо-сцены (--demo): записываются в hero-GIF, поэтому фразы — из словаря.
+    'demo.hello': "Hi! I'm Mira.",
+    'demo.care': 'Third night up past midnight. Go get some sleep — I am here.',
   };
 })();

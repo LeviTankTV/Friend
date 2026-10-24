@@ -27,6 +27,10 @@ function binName(name) {
 const DEV = process.argv.includes('--dev');
 // Самопроверка оболочки: прогон перетаскивания без человека (см. runSelfTest).
 const SELFTEST = process.argv.includes('--selftest');
+// Демо-режим: проигрывает «пьесу» (приветствие, ходьба, посадка, танец,
+// поглаживание, забота, сон) и САМ снимает кадры в GIF для README.
+// Человек запускает одну команду и получает docs/mira-hero.gif.
+const DEMO = process.argv.includes('--demo');
 const SERVER_ADDR = process.env.FRIEND_ADDR || '127.0.0.1:8787';
 const APP_URL = `http://${SERVER_ADDR}/`;
 
@@ -83,7 +87,7 @@ async function ensureServer() {
     return false;
   }
   const args = ['-web', path.join(__dirname, '..', 'web'), '-addr', SERVER_ADDR];
-  if (SELFTEST) {
+  if (SELFTEST || DEMO) {
     // Ночные ритуалы и прочие инициативы не должны попадать в середину
     // самопроверки: проактивная реплика, прилетевшая во время проверки
     // (облачко, TTS-генерация, махание рукой), сбивает замеры секций.
@@ -2743,12 +2747,167 @@ app.on('before-quit', () => {
   }
 });
 
+// --- Демо-режим: пьеса + съёмка + GIF --------------------------------------
+
+// runDemo — проигрывает сцены на странице и ПАРАЛЛЕЛЬНО снимает кадры окна
+// (capturePage раз в ~80 мс). В конце собирает кадры в GIF (gifenc, чистый
+// JS): один запуск — один docs/mira-hero.gif. Фон страницы на время записи
+// делается тёмным: GIF с прозрачностью не нужен, а на GitHub тёмный блок
+// выглядит как скриншот.
+async function runDemo() {
+  const framesDir = path.join(app.getPath('temp'), 'mira-demo');
+  fs.rmSync(framesDir, { recursive: true, force: true });
+  fs.mkdirSync(framesDir, { recursive: true });
+  const outGif = path.join(__dirname, '..', 'docs', 'mira-hero.gif');
+  fs.mkdirSync(path.dirname(outGif), { recursive: true });
+
+  // Ждём страницу и welcome (имя и язык приезжают с сервером).
+  for (let i = 0; i < 60; i++) {
+    const ready = await win.webContents.executeJavaScript(
+      '!!(window.friendApp && window.friendApp.avatar && window.friendLang)').catch(() => false);
+    if (ready) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+
+  // Рамка кадра: тёмный фон вместо прозрачности, подсказку в углу прячем.
+  await win.webContents.executeJavaScript(`(() => {
+    document.documentElement.style.background = '#0d1117';
+    document.body.style.background = '#0d1117';
+    const hint = document.getElementById('hint');
+    if (hint) hint.style.display = 'none';
+  })()`).catch(() => {});
+
+  let capturing = true;
+  const frameFiles = [];
+  const capture = (async () => {
+    let n = 0;
+    while (capturing) {
+      try {
+        const img = await win.webContents.capturePage();
+        const small = img.resize({ width: 320 });
+        const f = path.join(framesDir, String(n++).padStart(4, '0') + '.png');
+        fs.writeFileSync(f, small.toPNG());
+        frameFiles.push(f);
+      } catch (_e) { /* кадр не вышел — пропускаем */ }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+  })();
+
+  const scenes = win.webContents.executeJavaScript(`(async () => {
+    const fa = window.friendApp;
+    const av = fa.avatar;
+    const L = window.friendLang;
+    const t = (ms) => new Promise((r) => setTimeout(r, ms));
+    // 1. Приветствие: радость, взмах, реплика.
+    av.setEmotion('happy');
+    if (av.wave) av.wave();
+    fa.chat.showLine('her', L.L('demo.hello'));
+    if (av.say) av.say(L.L('demo.hello'));
+    await t(2300);
+    fa.chat.hideBubble();
+    // 2. Прогулка: кадры ног и покачивание (окно едет, в кадре — шаг).
+    fa.startWalk(1, Date.now() + 2500);
+    await t(2500);
+    fa.stopWalk('демо');
+    await t(400);
+    fa.chat.hideBubble();
+    // 3. Посадка на панель задач и потягивание.
+    fa.applySeat('taskbar');
+    await t(900);
+    if (av.fidgetNow) av.fidgetNow('stretch');
+    await t(2600);
+    fa.chat.hideBubble();
+    // 4. Поглаживание: синтетические движения по волосам — сердечки.
+    const stage = document.getElementById('stage');
+    const r = stage.getBoundingClientRect();
+    // Цель — как в самопроверке: канвас + контейнер + центр головы,
+    // быстрый шаг 16 мс (медленные события pet.js считает «мышью стоит»).
+    const view = fa.app.view.getBoundingClientRect();
+    const head = av.headRect();
+    const hx = view.left + av.container.x + (head.x0 + head.x1) / 2;
+    const hy = view.top + av.container.y + (head.y0 + head.y1) / 2;
+    for (let i = 0; i < 160; i++) {
+      stage.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        clientX: hx + Math.sin(i / 3) * 34,
+        clientY: hy + Math.cos(i / 4) * 10,
+      }));
+      await t(16);
+    }
+    const heartCount = av.hearts ? av.hearts() : -1;
+    console.log('[friend] demo: сердечек после поглаживания: ' + heartCount);
+    await t(1400);
+    fa.chat.hideBubble();
+    // 5. Танец: feed-уровни ~150 ударов в минуту (та же петля, что в тесте).
+    const m = fa.music;
+    if (m && m.feedStart) {
+      m.feedStart();
+      if (m.feedSelfSet) m.feedSelfSet(false);
+      const beat = 60000 / 150 / 2;
+      for (let i = 0; i < 14; i++) { m.feedLevelSet(i % 2 ? 0.006 : 0.05); await t(beat); }
+      m.feedStop();
+    } else {
+      await t(1300);
+    }
+    await t(1200);
+    // 6. Забота и сон: реплика, зевок, глаза закрылись, «Zzz».
+    const care = L.L('demo.care');
+    fa.chat.showLine('her', care);
+    if (av.say) av.say(care);
+    await t(2800);
+    if (av.yawn) av.yawn();
+    await t(1700);
+    av.setEmotion('sleep');
+    await t(2600);
+    return true;
+  })()`).catch((e) => { console.error('[friend] demo: сцены упали:', e.message); return false; });
+
+  await scenes;
+  await new Promise((r) => setTimeout(r, 900));
+  capturing = false;
+  await capture;
+
+  // GIF: nativeImage отдаёт BGRA — переводим в RGBA для gifenc (чистый JS).
+  let ok = false;
+  try {
+    const { GIFEncoder, quantize, applyPalette } = require('gifenc');
+    const gif = GIFEncoder();
+    for (let fi = 0; fi < frameFiles.length; fi += 2) {
+      const img = nativeImage.createFromPath(frameFiles[fi]);
+      const { width, height } = img.getSize();
+      if (!width || !height) continue;
+      const bgra = img.toBitmap();
+      const rgba = Buffer.alloc(width * height * 4);
+      for (let i = 0; i < width * height; i++) {
+        rgba[i * 4] = bgra[i * 4 + 2];
+        rgba[i * 4 + 1] = bgra[i * 4 + 1];
+        rgba[i * 4 + 2] = bgra[i * 4];
+        rgba[i * 4 + 3] = 255;
+      }
+      const palette = quantize(rgba, 256);
+      const index = applyPalette(rgba, palette);
+      gif.writeFrame(index, width, height, { palette, delay: 160 });
+    }
+    gif.finish();
+    fs.writeFileSync(outGif, gif.bytes());
+    const sz = fs.statSync(outGif).size;
+    console.log('[friend] demo: GIF готов — ' + outGif + ' (' + Math.round(sz / 1024) + ' КБ, кадров ' + frameFiles.length + ')');
+    ok = true;
+  } catch (e) {
+    console.log('[friend] demo: GIF не собрался (' + e.message + '); PNG-кадры: ' + framesDir);
+  }
+  app.exit(ok ? 0 : 1);
+}
+
 app.whenReady().then(async () => {
   const ok = await ensureServer();
   if (!ok) console.error('[friend] продолжаем без сервера: окно покажет подсказку');
   createWindow();
-  createTray();
-  ensureFocusWatch();
+  if (!DEMO) {
+    createTray();
+    ensureFocusWatch();
+  }
 
   // Автозапуск: пожелание человека — в настройках, исполнение — в ключе
   // автозапуска Windows. Ключ может быть удален руками (Task Manager, «Автозагрузка»),
@@ -2783,6 +2942,14 @@ app.whenReady().then(async () => {
   screen.on('display-added', () => { ensureOnScreen('подключили экран'); void checkDrawing('подключили экран'); });
   screen.on('display-removed', () => { ensureOnScreen('отключили экран'); void checkDrawing('отключили экран'); });
   screen.on('display-metrics-changed', () => { ensureOnScreen('изменились настройки экрана'); void checkDrawing('изменились настройки экрана'); });
+
+  if (DEMO) {
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(() => {
+        runDemo().catch((err) => { console.error('[friend] demo упал:', err); app.exit(1); });
+      }, 1200);
+    });
+  }
 
   if (SELFTEST) {
     // Ждём, пока страница действительно соберётся: самопроверка меряет
