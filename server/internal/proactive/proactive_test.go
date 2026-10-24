@@ -449,3 +449,79 @@ func TestPatternFiresOncePerDay(t *testing.T) {
 		t.Fatal("глубокой ночью паттерн молчит")
 	}
 }
+
+// Этап 11б: встреча после долгого отсутствия — переход «не было → есть»,
+// короче трёх часов не считается, повторно на том же возвращении не звучит.
+func TestReturnAfterAbsence(t *testing.T) {
+	s := New(cfg())
+	s.SetStarted(day(9, 0))
+	// Утром он за машиной.
+	if _, ok := s.Tick(Inputs{Now: day(9, 0), LastInput: day(8, 58)}); ok {
+		t.Fatal("посев присутствия не повод говорить")
+	}
+	// Обед: его нет полтора часа (короче AwayMin), вернулся — встречи нет
+	// (вода в это время сработать может: 4,5 ч от старта — её право).
+	if ev, ok := s.Tick(Inputs{Now: day(13, 30), LastInput: day(13, 28)}); ok && ev.Kind == KindReturn {
+		t.Fatal("полтора часа отсутствия — не встреча")
+	}
+	// Ушёл в 13:58: тик в 18:00 видит «его нет» (она может засыпать — её
+	// право; встречей это не считается).
+	if ev, ok := s.Tick(Inputs{Now: day(18, 0), LastInput: day(13, 58)}); ok && ev.Kind == KindReturn {
+		t.Fatal("отсутствующему встречу не говорят")
+	}
+	// Вернулся в 19:00: переход «не было → есть», пять часов отсутствия.
+	ev, ok := s.Tick(Inputs{Now: day(19, 0), LastInput: day(19, 0)})
+	if !ok || ev.Kind != KindReturn {
+		t.Fatalf("пять часов отсутствия — встреча: ok=%v ev=%+v", ok, ev)
+	}
+	if !strings.Contains(ev.Reason, "5 часов") {
+		t.Fatalf("в поводе — сколько его не было: %q", ev.Reason)
+	}
+	s.MarkSent(ev.Kind, day(19, 0))
+	// Он на месте; обычные тики встречи не повторяют.
+	if ev, ok := s.Tick(Inputs{Now: day(19, 30), LastInput: day(19, 28)}); ok && ev.Kind == KindReturn {
+		t.Fatal("встреча звучит один раз на возвращение")
+	}
+	// Сутки отсутствия считаются днями.
+	s2 := New(cfg())
+	s2.SetStarted(day(9, 0))
+	_, _ = s2.Tick(Inputs{Now: day(9, 0), LastInput: day(8, 58)})
+	// Тик «его нет» между присутствиями — иначе перехода не видно.
+	_, _ = s2.Tick(Inputs{Now: day(9, 0).Add(26 * time.Hour), LastInput: day(8, 58)})
+	ev2, ok := s2.Tick(Inputs{Now: day(9, 0).Add(26*time.Hour + 2*time.Hour), LastInput: day(9, 0).Add(26*time.Hour + 2*time.Hour)})
+	if !ok || ev2.Kind != KindReturn || !strings.Contains(ev2.Reason, "1 день") {
+		t.Fatalf("сутки отсутствия: ok=%v ev=%+v", ok, ev2)
+	}
+}
+
+// Этап 11б: возврат к старому факту — раз в день, занятому не мешает.
+func TestFollowupOncePerDay(t *testing.T) {
+	s := New(cfg())
+	s.SetStarted(day(9, 0))
+	_, _ = s.Tick(Inputs{Now: day(9, 0), LastInput: day(8, 58)})
+	base := Inputs{
+		Now: day(12, 0), LastInput: day(11, 58), LastSay: day(11, 50),
+		FollowupFact: "кот ездит на дачу", FollowupDays: 40,
+	}
+	ev, ok := s.Tick(base)
+	if !ok || ev.Kind != KindFollowup {
+		t.Fatalf("старый факт — вернуться к нему: ok=%v ev=%+v", ok, ev)
+	}
+	if !strings.Contains(ev.Reason, "40 дней назад") || !strings.Contains(ev.Reason, "кот ездит") {
+		t.Fatalf("в поводе — возраст и сам факт: %q", ev.Reason)
+	}
+	s.MarkSent(KindFollowup, day(12, 0))
+	if _, ok := s.Tick(base); ok {
+		t.Fatal("к фактам возвращаются раз в день")
+	}
+	// Занятому в коде — не сейчас (факт подождёт свободного момента).
+	s2 := New(cfg())
+	s2.SetStarted(day(9, 0))
+	_, _ = s2.Tick(Inputs{Now: day(9, 0), LastInput: day(8, 58)})
+	busy := base
+	busy.HasFocus = true
+	busy.Focus = focus.Snapshot{Process: "goland64.exe", Kind: focus.KindCode, Label: "GoLand", Since: day(11, 0)}
+	if _, ok := s2.Tick(busy); ok {
+		t.Fatal("занятому в редакторе факты не подсовывают")
+	}
+}

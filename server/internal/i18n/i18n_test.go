@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Два инварианта словарей: ни одного пустого поля (пустая строка в промпте —
@@ -51,5 +52,38 @@ func TestFor(t *testing.T) {
 	}
 	if For("ru") != &RU || For("") != &RU || For("de") != &RU {
 		t.Fatal("всё, кроме en, — русский: битый код языка не ломает личность")
+	}
+}
+
+// Счёта словами: русская плюрализация — 1/2/5, 21; английская — 1/many.
+func TestCounts(t *testing.T) {
+	cases := []struct {
+		lang string
+		n    int
+		want string
+	}{
+		{"ru", 1, "1 ночь"}, {"ru", 3, "3 ночи"}, {"ru", 5, "5 ночей"},
+		{"ru", 21, "21 ночь"}, {"ru", 22, "22 ночи"}, {"ru", 11, "11 ночей"},
+		{"en", 1, "1 night"}, {"en", 3, "3 nights"},
+	}
+	for _, c := range cases {
+		if got := CountNights(c.lang, c.n); got != c.want {
+			t.Errorf("CountNights(%q,%d) = %q, ожидалось %q", c.lang, c.n, got, c.want)
+		}
+	}
+	if got := CountDays("ru", 2); got != "2 дня" {
+		t.Errorf("CountDays: %q", got)
+	}
+	if got := CountDays("ru", 30); got != "30 дней" {
+		t.Errorf("CountDays: %q", got)
+	}
+	if got := CountHours("ru", 4*time.Hour); got != "4 часа" {
+		t.Errorf("CountHours: %q", got)
+	}
+	if got := DaysAgo("ru", 30); got != "30 дней назад" {
+		t.Errorf("DaysAgo: %q", got)
+	}
+	if got := DaysAgo("en", 30); got != "30 days ago" {
+		t.Errorf("DaysAgo en: %q", got)
 	}
 }

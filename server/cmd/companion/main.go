@@ -267,7 +267,7 @@ func run() error {
 		if !ok || !patterns.Notable(n) {
 			return ""
 		}
-		return fmt.Sprintf(i18n.For(profile.Language).PLateNights, n)
+		return fmt.Sprintf(i18n.For(profile.Language).PLateNights, i18n.CountNights(profile.Language, n))
 	})
 
 	go proactiveLoop(ctx, log, sched, comp, hub, sess, tracker, mem, store,
@@ -361,6 +361,8 @@ func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Sched
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	prevPart := persona.PartOf(time.Now())
+	// Возврат к старым фактам (этап 11б): один подбор на день.
+	followupDay, followupFact, followupDays := "", "", 0
 	// Когда она заговорила сама в последний раз (для проверки игнора).
 	var lastProactive time.Time
 	// Проверка игнора уже применена к этой проактивной реплике.
@@ -430,6 +432,21 @@ func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Sched
 		if n, ok := lateNightsNow(mem); ok {
 			in.LateNights = n
 		}
+		// Возврат к старому факту (этап 11б): подбор — тяжёлее тика, поэтому
+		// один раз на день, а не на каждый тик (meta-ключ в памяти хранит
+		// выбранный факт, чтобы завтра взять другой).
+		if day := now.Format("2006-01-02"); day != followupDay {
+			followupDay = day
+			followupFact, followupDays = "", 0
+			if mem != nil {
+				if f, ok, err := mem.FollowupFact(now); err != nil {
+					log.Warn("факт для возврата не выбран", "err", err)
+				} else if ok {
+					followupFact, followupDays = f.Text, int(now.Sub(f.Created).Hours()/24)
+				}
+			}
+		}
+		in.FollowupFact, in.FollowupDays = followupFact, followupDays
 		if s, ok := tracker.Snapshot(); ok {
 			in.Focus, in.HasFocus = s, true
 			in.LastInput = s.IdleAt

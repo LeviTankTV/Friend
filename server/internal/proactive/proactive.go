@@ -23,6 +23,7 @@ package proactive
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +63,12 @@ const (
 	// KindPattern — накопленный недосып (этап 11а, глубина чувств): три
 	// ночи за полночь за неделю. Бережная реплика про него, раз в день.
 	KindPattern Kind = "pattern"
+	// KindReturn — тёплая встреча после долгого отсутствия (этап 11б):
+	// его не было часами, и вот он вернулся.
+	KindReturn Kind = "return"
+	// KindFollowup — возврат к старому факту (этап 11б): «месяц назад ты
+	// говорил про… — как там?».
+	KindFollowup Kind = "followup"
 )
 
 // Пороги триггеров. Всё, что стоит за числом с объяснением.
@@ -76,6 +83,7 @@ const (
 	AppMarathonMin = 2 * time.Hour    // «в редакторе уже 2 часа»
 	GameMarathon   = 90 * time.Minute // «в игре уже полтора часа» — поддразнить
 	CareMarathon   = 60 * time.Minute // час в редакторе ночью — бережность
+	AwayMin         = 3 * time.Hour   // три часа отсутствия — «вернулся» (11б)
 	PresenceMax    = 20 * time.Minute // после этого он уже «не рядом»
 	SilenceMin     = 60 * time.Minute // час молчания при нём — повод мягко появиться
 )
@@ -110,6 +118,11 @@ type Inputs struct {
 	// LateNights — сколько ночей за полночь он говорил с ней за последнюю
 	// неделю (этап 11а, internal/patterns). 0 — данных нет / недосыпа нет.
 	LateNights int
+	// FollowupFact — старый факт из памяти для возврата к нему (этап 11б).
+	// Пусто — старых фактов нет; возраст отдельно (FollowupDays).
+	FollowupFact string
+	// FollowupDays — сколько дней назад факт записан.
+	FollowupDays int
 }
 
 // Event — сработавший повод. Reason — короткий текст-установка для модели
@@ -136,6 +149,14 @@ type Scheduler struct {
 	lastNight     time.Time // ночной ритуал «пора спать, я рядом» уже был за эту ночь?
 	lastCare      time.Time // ночная бережность про редактор уже была за эту ночь?
 	lastPattern   time.Time // про накопленный недосып сегодня уже говорили (этап 11а)
+	lastFollowup  time.Time // к старому факту сегодня уже возвращались (11б)
+	// Встреча после отсутствия (11б): помним, был ли он рядом на прошлом
+	// тике и когда видели его живым в последний раз.
+	prevPresent    bool
+	lastSeenActive time.Time
+	absenceSeeded  bool
+	retAway        string    // сколько его не было, если только вернулся (11б)
+	retAwayAt      time.Time // когда возвращение замечено
 	lastAppNag    time.Time // «чай в редакторе» уже было? (для этого захода в приложение)
 	lastGameNag   time.Time // «опять в игре?» уже было? (для этого захода в игру)
 	lastDayPart   persona.DayPart
@@ -209,6 +230,9 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 	if !s.cfg.Enabled {
 		return Event{}, false // планировщик выключен человеком (или самопроверкой)
 	}
+	// Присутствие отслеживаем РАНЬШЕ всех ранних выходов: посев части суток
+	// и антиспам-пауза не должны прятать от неё «ушёл-вернулся».
+	s.trackPresence(in)
 
 	if !s.seeded {
 		// Первый тик: запоминаем текущую часть суток, не считая её «сменой».
@@ -235,6 +259,7 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 		{KindCare, s.care, rule{allowQuiet: true}},
 		{KindSleep, s.sleep, rule{allowQuiet: true}},
 		{KindIdle, s.idle, rule{allowQuiet: true}},
+		{KindReturn, s.ret, rule{}},
 		{KindWater, s.water, rule{}},
 		{KindApp, s.app, rule{}},
 		{KindGame, s.game, rule{}},
@@ -242,6 +267,7 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 		{KindEvening, s.evening, rule{}},
 		{KindSilence, s.silence, rule{}},
 		{KindPattern, s.pattern, rule{}},
+		{KindFollowup, s.followup, rule{}},
 	}
 
 	for _, c := range cands {
@@ -491,7 +517,8 @@ func (s *Scheduler) pattern(in Inputs) (Event, bool) {
 	if !s.lastPattern.IsZero() && sameDay(s.lastPattern, in.Now) {
 		return Event{}, false // сегодня про недосып уже говорили
 	}
-	return Event{Kind: KindPattern, Reason: fmt.Sprintf(d(in).PatternReason, in.LateNights)}, true
+	return Event{Kind: KindPattern, Reason: fmt.Sprintf(d(in).PatternReason,
+		i18n.CountNights(in.Language, in.LateNights))}, true
 }
 
 // sameDay — один ли календарный день у двух моментов (локальное время).
@@ -499,6 +526,75 @@ func sameDay(a, b time.Time) bool {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return ay == by && am == bm && ad == bd
+}
+
+// trackPresence — слежение за присутствием (этап 11б): вызывается КАЖДЫЙ
+// тик до проверки кандидатов (триггер может не дойти до «встречи», а факт
+// «ушёл-вернулся» обязан быть замечен). Сервер, запущенный во время
+// отсутствия, встречи не устраивает: она не видела, как он уходил.
+func (s *Scheduler) trackPresence(in Inputs) {
+	cur := present(in)
+	if !s.absenceSeeded {
+		// Первый тик — сеем состояние: «вернулся» без «ушёл» не бывает.
+		s.absenceSeeded = true
+		s.prevPresent = cur
+		if cur {
+			s.lastSeenActive = in.LastInput
+		}
+		return
+	}
+	was := s.prevPresent
+	s.prevPresent = cur
+	if was || !cur || s.lastSeenActive.IsZero() {
+		if cur {
+			s.lastSeenActive = in.LastInput
+		}
+		return
+	}
+	if away := in.LastInput.Sub(s.lastSeenActive); away >= AwayMin {
+		if away >= 24*time.Hour {
+			s.retAway = i18n.CountDays(in.Language, int(away.Hours()/24))
+		} else {
+			s.retAway = i18n.CountHours(in.Language, away)
+		}
+		s.retAwayAt = in.Now
+	}
+	s.lastSeenActive = in.LastInput
+}
+
+// retExpire — сколько живёт «встреча»: переход мог случиться в паузе
+// анти-спама или в окне тишины, и встречать человека утром за вчерашнее
+// возвращение — неправда.
+const retExpire = 15 * time.Minute
+
+// ret — тёплая встреча после долгого отсутствия (этап 11б): сам переход
+// ловит trackPresence, здесь остаётся только решение «говорить» (и живёт
+// возвращение недолго — см. retExpire).
+func (s *Scheduler) ret(in Inputs) (Event, bool) {
+	if s.retAway == "" || in.Now.Sub(s.retAwayAt) > retExpire {
+		return Event{}, false
+	}
+	return Event{Kind: KindReturn, Reason: fmt.Sprintf(d(in).ReturnReason, s.retAway)}, true
+}
+
+// followup — возврат к старому факту (этап 11б): факт приходит готовым из
+// памяти (main.go), здесь — только решение «пора сказать». Раз в день,
+// рядом, не занятому, днём.
+func (s *Scheduler) followup(in Inputs) (Event, bool) {
+	if strings.TrimSpace(in.FollowupFact) == "" || in.FollowupDays <= 0 {
+		return Event{}, false
+	}
+	if busy(in) {
+		return Event{}, false
+	}
+	if !present(in) {
+		return Event{}, false
+	}
+	if !s.lastFollowup.IsZero() && sameDay(s.lastFollowup, in.Now) {
+		return Event{}, false
+	}
+	return Event{Kind: KindFollowup, Reason: fmt.Sprintf(d(in).FollowupReason,
+		i18n.DaysAgo(in.Language, in.FollowupDays), in.FollowupFact)}, true
 }
 
 // MarkSent отмечает ОТПРАВЛЕННУЮ реплику: она обнуляет отсчёт анти-спама,
@@ -523,6 +619,8 @@ func (s *Scheduler) MarkSent(kind Kind, now time.Time) {
 		s.lastGameNag = now
 	case KindPattern:
 		s.lastPattern = now
+	case KindFollowup:
+		s.lastFollowup = now
 	case KindMorning, KindEvening:
 		s.lastDayPart = persona.PartOf(now)
 	}

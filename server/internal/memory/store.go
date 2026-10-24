@@ -22,8 +22,10 @@ package memory
 
 import (
 	"database/sql"
+	"fmt"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,6 +317,54 @@ func (s *Store) FactCount() int {
 	var n int
 	s.db.QueryRow(`SELECT COUNT(*) FROM facts`).Scan(&n)
 	return n
+}
+
+// getMeta/setMeta — ключ-значение в таблице meta (upsert).
+func (s *Store) getMeta(key string) string {
+	var v string
+	s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
+	return v
+}
+
+func (s *Store) setMeta(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO meta(key, value) VALUES(?, ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// FollowupMinAge — младше этого возраста факт не «возврат», а новость.
+const FollowupMinAge = 21 * 24 * time.Hour
+
+// FollowupFact — старый факт для возврата к нему (этап 11б): создан раньше
+// cutoff, не тот, что показывали в прошлый раз (meta followup_id), из тех,
+// что старше — случайный, чтобы не ходить по списку по кругу. Пусто —
+// старых фактов нет.
+func (s *Store) FollowupFact(now time.Time) (Fact, bool, error) {
+	var lastID int64
+	if _, err := fmt.Sscanf(s.getMeta("followup_id"), "%d", &lastID); err != nil {
+		lastID = 0
+	}
+	rows, err := s.db.Query(`
+SELECT id, text, created FROM facts
+WHERE created < ? AND id != ?
+ORDER BY RANDOM() LIMIT 3`,
+		now.Add(-FollowupMinAge).UTC().Format(time.RFC3339), lastID)
+	if err != nil {
+		return Fact{}, false, err
+	}
+	defer rows.Close()
+	facts, err := scanFacts(rows)
+	if err != nil {
+		return Fact{}, false, err
+	}
+	if len(facts) == 0 {
+		return Fact{}, false, nil
+	}
+	pick := facts[0]
+	if err := s.setMeta("followup_id", strconv.FormatInt(pick.ID, 10)); err != nil {
+		return Fact{}, false, err
+	}
+	return pick, true, nil
 }
 
 // ConvoCount — сколько реплик в архиве.

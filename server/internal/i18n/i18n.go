@@ -11,7 +11,11 @@
 // словами об этом спрашивают модель».
 package i18n
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Dict — плоский набор строк, сгруппированный по потребителю. Форматные
 // строки — в терминах fmt (порядок аргументов фиксирован и сверен тестом).
@@ -84,8 +88,14 @@ type Dict struct {
 	MoodLine     string
 
 	// Паттерны за дни (этап 11а, patterns): строка в промпт и повод.
-	PLateNights   string // промпт: %d ночей
-	PatternReason string // повод: %d ночей
+	// Счёта (сколько ночей/часов/дней) приходит ГОТОВЫМ (CountNights и др.):
+	// множественное число русского склоняется, в шаблоне его не решить.
+	PLateNights   string // промпт: %s «3 ночи»
+	PatternReason string // повод: %s
+
+	// Забота и инициатива (этап 11б). Счёта — готовые фразы, как выше.
+	ReturnReason   string // %s «5 ч» отсутствия
+	FollowupReason string // %s «30 дней назад»-возраст, %s факт
 
 	// --- companion: обстановка, эмпатия, память, инструкции ---
 	CtxHeader     string // «\n\nОбстановка сейчас: »
@@ -191,7 +201,7 @@ var RU = Dict{
 	MoodLine:     "Твоё внутреннее состояние сейчас: настроение — %s; энергия — %s; отношение к человеку — %s." +
 		" Это слышно в твоём тоне и длине реплик. Не пересказывай своё состояние" +
 		" цифрами, не считай его вслух и не жалуйся на него — оно просто звучит в речи.",
-	PLateNights:   "Он засиживается за полночь уже %d ночей за последнюю неделю — сегодня побереги его в тоне.",
+	PLateNights:   "Он засиживается за полночь уже %s за последнюю неделю — сегодня побереги его в тоне.",
 
 	CtxHeader: "\n\nОбстановка сейчас: ",
 	UserStateLine: "\n\nОн сейчас: %s" +
@@ -245,8 +255,13 @@ var RU = Dict{
 		"и не превращай вопрос в анкету.",
 	SilenceReason: "Он рядом, но молчит уже %d минут. Спроси ЕГО лично — «ты тут, всё в " +
 		"порядке?» — тепло и про него, а не «у всех» и не «чем помочь».",
-	PatternReason: "Он недосыпает: %d ночей за полночь за последнюю неделю. ОДНА мягкая реплика " +
+	PatternReason: "Он недосыпает: %s за полночь за последнюю неделю. ОДНА мягкая реплика " +
 		"про НЕГО — тебе заметно, что он устал, но без лекции и без планов «лечь пораньше».",
+
+	ReturnReason: "Он вернулся — его не было %s. Встреть его ОДНОЙ тёплой репликой лично: " +
+		"рада, что он снова здесь, без допроса «где ты был».",
+	FollowupReason: "%s он рассказал тебе: «%s». Вернись к этому ОДНОЙ короткой репликой " +
+		"по-человечески: спроси, как там оно, — без отчёта и без «я помню, ты говорил».",
 }
 
 // EN — английский словарь. Инструкции модели переведены с сохранением всех
@@ -315,7 +330,7 @@ var EN = Dict{
 	MoodLine: "Your inner state right now: mood — %s; energy — %s; feeling toward him — %s." +
 		" It is heard in your tone and the length of your lines. Do not retell your state" +
 		" in numbers, do not count it out loud and do not complain about it — it simply sounds in your speech.",
-	PLateNights: "He has been up past midnight %d nights this week — be gentler with him in your tone today.",
+	PLateNights: "He has been up past midnight %s this week — be gentler with him in your tone today.",
 
 	CtxHeader: "\n\nThe situation right now: ",
 	UserStateLine: "\n\nHe is right now: %s" +
@@ -369,8 +384,13 @@ var EN = Dict{
 		"and do not turn the question into a questionnaire.",
 	SilenceReason: "He is around but has been silent for %d minutes. Ask HIM personally — " +
 		"\"you there, everything okay?\" — warm and about him, not \"everyone\" and not \"how can I help\".",
-	PatternReason: "He is running short on sleep: %d nights past midnight this week. ONE soft line " +
+	PatternReason: "He is running short on sleep: %s past midnight this week. ONE soft line " +
 		"ABOUT HIM — you can see he is tired, but no lecturing and no \"go to bed early\" plans.",
+
+	ReturnReason: "He is back — he was gone for %s. Greet him with ONE warm personal line: " +
+		"you are glad he is here again, no interrogation about \"where were you\".",
+	FollowupReason: "%s he told you: \"%s\". Come back to it with ONE short human line: " +
+		"ask how it is going — no report and no \"I remember you told me\".",
 }
 
 // For возвращает словарь по коду языка. Всё, что не «en», — русский: битый
@@ -380,4 +400,69 @@ func For(lang string) *Dict {
 		return &EN
 	}
 	return &RU
+}
+
+// Счёта словами: русское множественное склоняется (1 ночь, 3 ночи, 5 ночей),
+// английское не склоняется. Эти функции — единственное место, где про это
+// знает код; шаблоны поводов получают ГОТОВУЮ фразу.
+
+// CountNights — «3 ночи» / "3 nights".
+func CountNights(lang string, n int) string {
+	if For(lang) == &EN {
+		return fmt.Sprintf("%d %s", n, enPlural(n, "night", "nights"))
+	}
+	return fmt.Sprintf("%d %s", n, ruPlural(n, "ночь", "ночи", "ночей"))
+}
+
+// CountDays — «2 дня» / "2 days".
+func CountDays(lang string, n int) string {
+	if For(lang) == &EN {
+		return fmt.Sprintf("%d %s", n, enPlural(n, "day", "days"))
+	}
+	return fmt.Sprintf("%d %s", n, ruPlural(n, "день", "дня", "дней"))
+}
+
+// CountHours — «4 часа» / "4 hours" (полные часы, без минут).
+func CountHours(lang string, d time.Duration) string {
+	n := int(d.Hours())
+	if For(lang) == &EN {
+		return fmt.Sprintf("%d %s", n, enPlural(n, "hour", "hours"))
+	}
+	return fmt.Sprintf("%d %s", n, ruPlural(n, "час", "часа", "часов"))
+}
+
+// DaysAgo — «3 дня назад» / "3 days ago".
+func DaysAgo(lang string, n int) string {
+	if For(lang) == &EN {
+		return fmt.Sprintf("%d %s ago", n, enPlural(n, "day", "days"))
+	}
+	return fmt.Sprintf("%d %s назад", n, ruPlural(n, "день", "дня", "дней"))
+}
+
+// ruPlural — одна/две/много для русских существительных: 1 ночь, 21 ночь,
+// 2–4 ночи, 5–20 ночей.
+func ruPlural(n int, one, few, many string) string {
+	n = abs(n)
+	switch {
+	case n%10 == 1 && n%100 != 11:
+		return one
+	case n%10 >= 2 && n%10 <= 4 && (n%100 < 10 || n%100 >= 20):
+		return few
+	default:
+		return many
+	}
+}
+
+func enPlural(n int, one, many string) string {
+	if abs(n) == 1 {
+		return one
+	}
+	return many
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
