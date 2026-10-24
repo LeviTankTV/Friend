@@ -44,7 +44,7 @@ type Options struct {
 // 0 = базовый голос).
 type TTSService interface {
 	Available() bool
-	Synth(ctx context.Context, text string, rateDelta, pitchDelta int) (string, error)
+	Synth(ctx context.Context, text string, rateDelta, pitchDelta, volDelta int) (string, error)
 }
 
 // STTService — распознающая сторона (реализация — internal/stt.Service).
@@ -126,10 +126,17 @@ func New(opts Options) (*http.Server, error) {
 			if pitchDelta > 50 {
 				pitchDelta = 50
 			}
+			// Тише ночью (этап 11в): окно 23:00–7:00 — время, когда громкий
+			// голос из колонок бьёт по тишине всей квартиры. −30% — та же
+			// реплика, но вполголоса; в кэше она живёт отдельным файлом.
+			volDelta := 0
+			if h := time.Now().Hour(); h >= 23 || h < 7 {
+				volDelta = -30
+			}
 			// Таймаут не берём из контекста запроса: страница обрывает
 			// соединение, когда дослушано, а генерация должна дожить до
 			// конца. Отдельный контекст с запасом на саму генерацию.
-			path, err := opts.TTS.Synth(context.Background(), text, rateDelta, pitchDelta)
+			path, err := opts.TTS.Synth(context.Background(), text, rateDelta, pitchDelta, volDelta)
 			if err != nil {
 				http.Error(w, "озвучка не получилась: "+err.Error(), http.StatusServiceUnavailable)
 				return

@@ -91,12 +91,12 @@ func (s *Service) Voice() string {
 	return s.voice
 }
 
-// cachePath — файл кэша по хэшу голоса, темпа, тона и текста.
-func (s *Service) cachePath(text, rate, pitch string) string {
+// cachePath — файл кэша по хэшу голоса, темпа, тона, громкости и текста.
+func (s *Service) cachePath(text, rate, pitch, volume string) string {
 	if s.cache == "" {
 		return ""
 	}
-	sum := sha1.Sum([]byte(s.voice + "|" + rate + "|" + pitch + "|" + text))
+	sum := sha1.Sum([]byte(s.voice + "|" + rate + "|" + pitch + "|" + volume + "|" + text))
 	return filepath.Join(s.cache, hex.EncodeToString(sum[:])+".mp3")
 }
 
@@ -132,10 +132,11 @@ func parseRate(v string) int {
 
 // Synth готовит mp3 и возвращает путь к файлу. rateDelta и pitchDelta —
 // интонация запроса (проценты и герцы, ограничены ±50): радость/грусть/
-// сон (этап 9б). 0,0 = базовый голос. Генерация сериализована и
-// ограничена по времени; кэш проверяется и под блокировкой (другой запрос
-// мог сгенерировать ту же фразу, пока мы ждали очередь).
-func (s *Service) Synth(ctx context.Context, text string, rateDelta, pitchDelta int) (string, error) {
+// сон (этап 9б). volDelta — громкость (проценты, этап 11в: ночью тише).
+// 0,0,0 = базовый голос. Генерация сериализована и ограничена по времени;
+// кэш проверяется и под блокировкой (другой запрос мог сгенерировать ту
+// же фразу, пока мы ждали очередь).
+func (s *Service) Synth(ctx context.Context, text string, rateDelta, pitchDelta, volDelta int) (string, error) {
 	if !s.Available() {
 		return "", fmt.Errorf("озвучка недоступна")
 	}
@@ -160,9 +161,17 @@ func (s *Service) Synth(ctx context.Context, text string, rateDelta, pitchDelta 
 	if pitch > 50 {
 		pitch = 50
 	}
+	volume := volDelta
+	if volume < -50 {
+		volume = -50
+	}
+	if volume > 50 {
+		volume = 50
+	}
 	rateStr := fmt.Sprintf("%+d%%", rate)
 	pitchStr := fmt.Sprintf("%+dHz", pitch)
-	if path := s.cachePath(text, rateStr, pitchStr); path != "" {
+	volStr := fmt.Sprintf("%+d%%", volume)
+	if path := s.cachePath(text, rateStr, pitchStr, volStr); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
@@ -171,13 +180,13 @@ func (s *Service) Synth(ctx context.Context, text string, rateDelta, pitchDelta 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if path := s.cachePath(text, rateStr, pitchStr); path != "" {
+	if path := s.cachePath(text, rateStr, pitchStr, volStr); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 	}
 
-	out := s.cachePath(text, rateStr, pitchStr)
+	out := s.cachePath(text, rateStr, pitchStr, volStr)
 	tmp := out
 	if tmp == "" {
 		f, err := os.CreateTemp("", "friend-tts-*.mp3")
@@ -195,6 +204,7 @@ func (s *Service) Synth(ctx context.Context, text string, rateDelta, pitchDelta 
 	// --pitch в герцах.
 	cmd := exec.CommandContext(ctx, s.edge,
 		"--voice", s.voice, "--rate", rateStr, "--pitch", pitchStr,
+		"--volume", volStr,
 		"--text", text, "--write-media", tmp)
 	// В приватный временный каталог служебный файл edge-tts не пишем:
 	// бинарник на Windows создаёт каталог рядом с cwd. Работаем из кэша.

@@ -45,7 +45,7 @@ func TestSynthProducesCachedFile(t *testing.T) {
 	if !s.Available() {
 		t.Fatal("edge-tts из PATH должен быть доступен")
 	}
-	path, err := s.Synth(context.Background(), "Привет, это проверка.", 0, 0)
+	path, err := s.Synth(context.Background(), "Привет, это проверка.", 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSynthProducesCachedFile(t *testing.T) {
 		t.Fatalf("mp3 слишком маленький: %d байт", fi.Size())
 	}
 	// Тот же текст второй раз — из кэша, тем же файлом.
-	path2, err := s.Synth(context.Background(), "Привет, это проверка.", 0, 0)
+	path2, err := s.Synth(context.Background(), "Привет, это проверка.", 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestSynthProducesCachedFile(t *testing.T) {
 		t.Fatalf("повтор той же фразы должен браться из кэша: %q vs %q", path2, path)
 	}
 	// Другой текст — другой файл.
-	path3, err := s.Synth(context.Background(), "Другая фраза.", 0, 0)
+	path3, err := s.Synth(context.Background(), "Другая фраза.", 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,14 +74,14 @@ func TestSynthProducesCachedFile(t *testing.T) {
 	}
 	// Интонация (этап 9б): та же фраза, сказанная другим тоном, — ДРУГОЙ
 	// файл кэша (радость ≠ покой), и повтор того же тона — из кэша.
-	path4, err := s.Synth(context.Background(), "Привет, это проверка.", 12, 8)
+	path4, err := s.Synth(context.Background(), "Привет, это проверка.", 12, 8, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if path4 == path {
 		t.Fatal("та же фраза другим тоном не должна лежать в одном файле")
 	}
-	path5, err := s.Synth(context.Background(), "Привет, это проверка.", 12, 8)
+	path5, err := s.Synth(context.Background(), "Привет, это проверка.", 12, 8, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestEmptyTextRejected(t *testing.T) {
 	fakeCLI(t, fake)
 	t.Setenv("PATH", fake)
 	s := New(quietLog(), true, "v", "+0%", t.TempDir(), "ru")
-	if _, err := s.Synth(context.Background(), "   ", 0, 0); err == nil {
+	if _, err := s.Synth(context.Background(), "   ", 0, 0, 0); err == nil {
 		t.Fatal("пустой текст озвучивать нельзя")
 	}
 }
@@ -140,5 +140,26 @@ func TestVoiceByLanguage(t *testing.T) {
 	}
 	if s := New(quietLog(), false, "en-US-AriaNeural", "", "", "ru"); s.voice != "en-US-AriaNeural" {
 		t.Fatal("явный голос конфига обязан побеждать язык")
+	}
+}
+
+// Этап 11в: громкость — отдельное измерение голоса (ночью тише), своя
+// запись в кэше; та же фраза той же интонации, но тише — другой файл.
+func TestVolumeSeparateCache(t *testing.T) {
+	fake := t.TempDir()
+	fakeCLI(t, fake)
+	t.Setenv("PATH", fake)
+	cache := t.TempDir()
+	s := New(quietLog(), true, "", "+0%", cache, "ru")
+	p1, err := s.Synth(context.Background(), "Ночная реплика.", 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := s.Synth(context.Background(), "Ночная реплика.", 0, 0, -30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1 == p2 {
+		t.Fatal("тихая версия обязана жить отдельным файлом кэша")
 	}
 }

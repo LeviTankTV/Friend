@@ -18,7 +18,7 @@ type fakeTTS struct {
 }
 
 func (f *fakeTTS) Available() bool { return true }
-func (f *fakeTTS) Synth(_ context.Context, _ string, rateDelta, pitchDelta int) (string, error) {
+func (f *fakeTTS) Synth(_ context.Context, _ string, rateDelta, pitchDelta, volDelta int) (string, error) {
 	f.lastRate, f.lastPitch = rateDelta, pitchDelta
 	return f.file, nil
 }

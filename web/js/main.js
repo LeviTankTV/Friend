@@ -671,14 +671,69 @@
     if (menu.settings().voice === false) return;
     const t = (text || '').trim();
     if (!t) return;
+    // Речь по предложениям (этап 11в): фразы с живыми паузами звучат
+    // естественнее монолита, и первая фраза начинает играть, не дожидаясь
+    // синтеза всей реплики.
+    speakSeq(splitSentences(t));
+  }
+
+  // speakSeq играет фразы по очереди; новая реплика перебивает прошлую
+  // (токен): ответ на новое сообщение не должен ждать хвоста старого.
+  let speakToken = 0;
+  async function speakSeq(parts) {
+    const my = ++speakToken;
     const int = speakIntonation();
-    const a = new Audio('/tts?text=' + encodeURIComponent(t) +
-      '&rate=' + int.rate + '&pitch=' + int.pitch);
-    a.addEventListener('playing', () => { ttsPlaying++; idleTouch(); });
-    const off = (ev) => { if (ev.type === 'ended' || ev.type === 'error') ttsPlaying = Math.max(0, ttsPlaying - 1); };
-    a.addEventListener('ended', off);
-    a.addEventListener('error', off);
-    a.play().catch(() => {});   // озвучка — украшение: не вышла, реплика в облачке
+    for (let i = 0; i < parts.length; i++) {
+      if (my !== speakToken) return;
+      await speakOne(parts[i], int);
+      if (my !== speakToken || i >= parts.length - 1) return;
+      await new Promise((r) => setTimeout(r, 180)); // пауза между фразами — как вдох
+    }
+  }
+
+  function speakOne(t, int) {
+    return new Promise((resolve) => {
+      const a = new Audio('/tts?text=' + encodeURIComponent(t) +
+        '&rate=' + int.rate + '&pitch=' + int.pitch);
+      a.addEventListener('playing', () => { ttsPlaying++; idleTouch(); });
+      const off = (ev) => {
+        if (ev.type === 'ended' || ev.type === 'error') {
+          ttsPlaying = Math.max(0, ttsPlaying - 1);
+          resolve();
+        }
+      };
+      a.addEventListener('ended', off);
+      a.addEventListener('error', off);
+      a.play().catch(() => resolve()); // озвучка — украшение: не вышла, реплика в облачке
+    });
+  }
+
+  // splitSentences — реплика на фразы: режем по .!?… в конце слова, длинные
+  // куски (сервер озвучивает до 400 знаков) — по словам.
+  function splitSentences(t) {
+    const parts = [];
+    let cur = '';
+    for (let i = 0; i < t.length; i++) {
+      cur += t[i];
+      if ('.!?…'.indexOf(t[i]) >= 0 && (i + 1 >= t.length || t[i + 1] === ' ' || t[i + 1] === '"')) {
+        if (cur.trim()) parts.push(cur.trim());
+        cur = '';
+      }
+    }
+    if (cur.trim()) parts.push(cur.trim());
+    const out = [];
+    for (const p of parts) {
+      if (p.length <= 380) { out.push(p); continue; }
+      let rest = p;
+      while (rest.length > 380) {
+        let cut = rest.lastIndexOf(' ', 380);
+        if (cut < 200) cut = 380;
+        out.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut);
+      }
+      if (rest.trim()) out.push(rest.trim());
+    }
+    return out.length ? out : [t];
   }
 
   // --- голосовой ввод (этап 7: локальный faster-whisper) -------------------
