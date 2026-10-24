@@ -512,3 +512,25 @@ func TestNoMoodSourceNoLine(t *testing.T) {
 		t.Fatal("без источника состояния строки быть не должно")
 	}
 }
+
+// Этап 11а: строка паттернов попадает в системный промпт одной строкой.
+func TestPatternsLineInPrompt(t *testing.T) {
+	m := &fakeModel{ready: true, answer: "Ага."}
+	c := New(testProfile(t), m, chat.New(10))
+	c.SetPatternsSource(func() string { return "Он засиживается за полночь уже 4 ночей." })
+	if _, err := c.Answer(context.Background(), "привет", ""); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	sys := m.got[0][0].Content
+	if !strings.Contains(sys, "4 ночей") {
+		t.Fatalf("строка паттерна должна быть в системном промпте: %q", sys)
+	}
+	m.got = nil
+	c.SetPatternsSource(func() string { return "" })
+	if _, err := c.Answer(context.Background(), "ещё раз", ""); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if strings.Contains(m.got[0][0].Content, "ночей") {
+		t.Fatal("пустой паттерн не оставляет строки в промпте")
+	}
+}

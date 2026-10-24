@@ -83,6 +83,10 @@ type Dict struct {
 	AffLow       string
 	MoodLine     string
 
+	// Паттерны за дни (этап 11а, patterns): строка в промпт и повод.
+	PLateNights   string // промпт: %d ночей
+	PatternReason string // повод: %d ночей
+
 	// --- companion: обстановка, эмпатия, память, инструкции ---
 	CtxHeader     string // «\n\nОбстановка сейчас: »
 	UserStateLine string // «\n\nОн сейчас: %s (%s)» — %s-2: как учитывать
@@ -187,6 +191,7 @@ var RU = Dict{
 	MoodLine:     "Твоё внутреннее состояние сейчас: настроение — %s; энергия — %s; отношение к человеку — %s." +
 		" Это слышно в твоём тоне и длине реплик. Не пересказывай своё состояние" +
 		" цифрами, не считай его вслух и не жалуйся на него — оно просто звучит в речи.",
+	PLateNights:   "Он засиживается за полночь уже %d ночей за последнюю неделю — сегодня побереги его в тоне.",
 
 	CtxHeader: "\n\nОбстановка сейчас: ",
 	UserStateLine: "\n\nОн сейчас: %s" +
@@ -240,6 +245,8 @@ var RU = Dict{
 		"и не превращай вопрос в анкету.",
 	SilenceReason: "Он рядом, но молчит уже %d минут. Спроси ЕГО лично — «ты тут, всё в " +
 		"порядке?» — тепло и про него, а не «у всех» и не «чем помочь».",
+	PatternReason: "Он недосыпает: %d ночей за полночь за последнюю неделю. ОДНА мягкая реплика " +
+		"про НЕГО — тебе заметно, что он устал, но без лекции и без планов «лечь пораньше».",
 }
 
 // EN — английский словарь. Инструкции модели переведены с сохранением всех
@@ -308,6 +315,7 @@ var EN = Dict{
 	MoodLine: "Your inner state right now: mood — %s; energy — %s; feeling toward him — %s." +
 		" It is heard in your tone and the length of your lines. Do not retell your state" +
 		" in numbers, do not count it out loud and do not complain about it — it simply sounds in your speech.",
+	PLateNights: "He has been up past midnight %d nights this week — be gentler with him in your tone today.",
 
 	CtxHeader: "\n\nThe situation right now: ",
 	UserStateLine: "\n\nHe is right now: %s" +
@@ -361,6 +369,8 @@ var EN = Dict{
 		"and do not turn the question into a questionnaire.",
 	SilenceReason: "He is around but has been silent for %d minutes. Ask HIM personally — " +
 		"\"you there, everything okay?\" — warm and about him, not \"everyone\" and not \"how can I help\".",
+	PatternReason: "He is running short on sleep: %d nights past midnight this week. ONE soft line " +
+		"ABOUT HIM — you can see he is tired, but no lecturing and no \"go to bed early\" plans.",
 }
 
 // For возвращает словарь по коду языка. Всё, что не «en», — русский: битый

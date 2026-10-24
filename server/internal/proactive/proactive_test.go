@@ -407,3 +407,45 @@ func TestAttemptCooldown(t *testing.T) {
 		t.Fatalf("после провала пулемёт по модели запрещён: %+v", ev)
 	}
 }
+
+// Этап 11а: накопленный недосып — дневная бережная реплика раз в день.
+func TestPatternFiresOncePerDay(t *testing.T) {
+	s := New(Config{Enabled: true, MinGap: 0, FoodReminder: time.Hour, QuietFromHour: 23, QuietToHour: 7})
+	now := time.Date(2026, 10, 25, 14, 0, 0, 0, time.Local)
+	s.SetStarted(now.Add(-time.Minute)) // иначе про воду сработает раньше паттерна
+	in := Inputs{Now: now, LateNights: 4}
+	in.LastInput = now // рядом
+	_, _ = s.Tick(Inputs{Now: now.Add(-30 * time.Second)}) // посев части суток
+
+	ev, ok := s.Tick(in)
+	if !ok || ev.Kind != KindPattern {
+		t.Fatalf("три ночи и больше — бережная реплика: %+v ok=%v", ev, ok)
+	}
+	if !strings.Contains(ev.Reason, "4 ночей") && !strings.Contains(ev.Reason, "4") {
+		t.Fatalf("в поводе должно быть число ночей: %q", ev.Reason)
+	}
+	s.MarkSent(KindPattern, now)
+	// Второй тик того же дня — молчит.
+	if _, ok := s.Tick(in); ok {
+		t.Fatal("про недосып — раз в день")
+	}
+	// Меньше трёх ночей — повода нет вовсе.
+	s2 := New(Config{Enabled: true, MinGap: 0, FoodReminder: time.Hour, QuietFromHour: 23, QuietToHour: 7})
+	s2.SetStarted(now.Add(-time.Minute))
+	_, _ = s2.Tick(Inputs{Now: now.Add(-30 * time.Second)})
+	if _, ok := s2.Tick(Inputs{Now: now, LateNights: 2, LastInput: now}); ok {
+		t.Fatal("две ночи — не паттерн")
+	}
+	// Окно тишины глушит (ночь — не время напоминать про недосып).
+	night := time.Date(2026, 10, 26, 1, 0, 0, 0, time.Local)
+	s3 := New(Config{Enabled: true, MinGap: 0, FoodReminder: time.Hour, QuietFromHour: 23, QuietToHour: 7})
+	s3.SetStarted(night.Add(-time.Minute))
+	_, _ = s3.Tick(Inputs{Now: night.Add(-30 * time.Second)})
+	// Ночные поводы честны этой ночью — молчать должен именно паттерн.
+	s3.MarkSent(KindNight, night)
+	s3.MarkSent(KindSleep, night)
+	ev2, ok2 := s3.Tick(Inputs{Now: night, LateNights: 5, LastInput: night})
+	if ok2 && ev2.Kind == KindPattern {
+		t.Fatal("глубокой ночью паттерн молчит")
+	}
+}

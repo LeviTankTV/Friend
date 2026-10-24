@@ -28,6 +28,7 @@ import (
 
 	"friend/internal/focus"
 	"friend/internal/i18n"
+	"friend/internal/patterns"
 	"friend/internal/persona"
 )
 
@@ -58,6 +59,9 @@ const (
 	// KindGame — поддразнивание игрой (этап 9д): долго в игре — короткая
 	// тёплая реплика с улыбкой («опять?»), без упрёка.
 	KindGame Kind = "game"
+	// KindPattern — накопленный недосып (этап 11а, глубина чувств): три
+	// ночи за полночь за неделю. Бережная реплика про него, раз в день.
+	KindPattern Kind = "pattern"
 )
 
 // Пороги триггеров. Всё, что стоит за числом с объяснением.
@@ -103,6 +107,9 @@ type Inputs struct {
 	HasFocus bool
 	// Language — язык персоны (этап 10): на нём собираются тексты поводов.
 	Language string
+	// LateNights — сколько ночей за полночь он говорил с ней за последнюю
+	// неделю (этап 11а, internal/patterns). 0 — данных нет / недосыпа нет.
+	LateNights int
 }
 
 // Event — сработавший повод. Reason — короткий текст-установка для модели
@@ -128,6 +135,7 @@ type Scheduler struct {
 	lastSleep     time.Time // «иди спать» сегодня уже было?
 	lastNight     time.Time // ночной ритуал «пора спать, я рядом» уже был за эту ночь?
 	lastCare      time.Time // ночная бережность про редактор уже была за эту ночь?
+	lastPattern   time.Time // про накопленный недосып сегодня уже говорили (этап 11а)
 	lastAppNag    time.Time // «чай в редакторе» уже было? (для этого захода в приложение)
 	lastGameNag   time.Time // «опять в игре?» уже было? (для этого захода в игру)
 	lastDayPart   persona.DayPart
@@ -233,6 +241,7 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 		{KindMorning, s.morning, rule{}},
 		{KindEvening, s.evening, rule{}},
 		{KindSilence, s.silence, rule{}},
+		{KindPattern, s.pattern, rule{}},
 	}
 
 	for _, c := range cands {
@@ -469,6 +478,29 @@ func (s *Scheduler) silence(in Inputs) (Event, bool) {
 	return Event{Kind: KindSilence, Reason: fmt.Sprintf(d(in).SilenceReason, minutes)}, true
 }
 
+// pattern — накопленный недосып (этап 11а): три ночи за полночь за неделю.
+// Дневной повод (окно тишины его глушит), раз в день, рядом. Не конкурирует
+// с «иди спать» — та про эту ночь, этот про неделю.
+func (s *Scheduler) pattern(in Inputs) (Event, bool) {
+	if !patterns.Notable(in.LateNights) {
+		return Event{}, false
+	}
+	if !present(in) {
+		return Event{}, false
+	}
+	if !s.lastPattern.IsZero() && sameDay(s.lastPattern, in.Now) {
+		return Event{}, false // сегодня про недосып уже говорили
+	}
+	return Event{Kind: KindPattern, Reason: fmt.Sprintf(d(in).PatternReason, in.LateNights)}, true
+}
+
+// sameDay — один ли календарный день у двух моментов (локальное время).
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
+}
+
 // MarkSent отмечает ОТПРАВЛЕННУЮ реплику: она обнуляет отсчёт анти-спама,
 // а для «иди спать» и «чая в редакторе» помнит ещё и факт по ночи/заходу.
 // now передаётся параметром, а не берётся из time.Now: тесты на фейковых
@@ -489,6 +521,8 @@ func (s *Scheduler) MarkSent(kind Kind, now time.Time) {
 		s.lastAppNag = now
 	case KindGame:
 		s.lastGameNag = now
+	case KindPattern:
+		s.lastPattern = now
 	case KindMorning, KindEvening:
 		s.lastDayPart = persona.PartOf(now)
 	}
