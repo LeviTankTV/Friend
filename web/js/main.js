@@ -943,6 +943,50 @@
   // Сказанные ей слова сервер уже поставил в разговорную очередь — её
   // ответ на них приедет отдельным ReplyMsg (и будет озвучен, как обычно).
   let wakeEvents = 0;
+  // --- тело и мимика (этап 11г) -------------------------------------------
+  //
+  // Утреннее потягивание: первая её реплика утром (6:00–12:00) после
+  // запуска — потянется, как человек после сна. Один раз за утро страницы:
+  // каждое утро — новая страница.
+  let morningStretched = false;
+  net.on('reply', (msg) => {
+    if (morningStretched || !msg) return;
+    const h = new Date().getHours();
+    if (h >= 6 && h < 12) morningStretched = avatar.fidgetNow('stretch');
+    else morningStretched = true; // не утро — потягивания не будет
+  });
+
+  // Зевок ко сну: реплика с emotion=sleep — она засыпает в этой фразе;
+  // зевок доигрывается ПОСЛЕ слов (рот занят речью), глаза уже закрыты.
+  net.on('reply', (msg) => {
+    if (!msg || msg.emotion !== 'sleep' || !avatar.yawn) return;
+    const len = ((msg.text || '') + '').length;
+    const speechMs = Math.min(7000, Math.max(1500, len * 45));
+    setTimeout(() => avatar.yawn(), speechMs);
+  });
+
+  // Взгляд «за экран»: в спокойном простое изредка отводит глаза в даль —
+  // как человек, задумавшийся глядя мимо монитора. Далёкая точка — за
+  // верхним краем окна: взгляд чуть вверх и в сторону.
+  let farGazeAt = Date.now() + (120 + Math.random() * 120) * 1000;
+  let farGazeUntil = 0;
+  setInterval(() => {
+    const now = Date.now();
+    if (now >= farGazeUntil && now < farGazeAt) return;
+    if (now >= farGazeAt) {
+      // Пора: 2,5 секунды в даль, если она спокойна и свободна.
+      const busy = chat.isThinking() || menu.isOpen() || avatar.emotion() === 'sleep' ||
+        (avatar.fidgetState && avatar.fidgetState());
+      if (busy) { farGazeAt = now + 60 * 1000; return; }
+      farGazeUntil = now + 2500;
+      farGazeAt = now + (150 + Math.random() * 210) * 1000;
+    }
+    if (now < farGazeUntil) {
+      const dx = Math.sin(now / 700) * window.innerWidth * 0.5;
+      avatar.lookAt(window.innerWidth / 2 + dx, -window.innerHeight * 2);
+    }
+  }, 100);
+
   net.on('wake', () => {
     wakeEvents++;
     avatar.setEmotion('happy');

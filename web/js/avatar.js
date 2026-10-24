@@ -692,6 +692,8 @@ window.FriendAvatar = (function () {
       blinking: false,
       asleep: false,
       talkUntil: 0,
+      yawnUntil: 0,
+      yawning: false,
       talkFlip: 0,
       waving: 0,
       lookX: 0,
@@ -849,10 +851,12 @@ window.FriendAvatar = (function () {
     // «включил анимацию». Речь, драг, танец, шаг и сон перекрывают
     // микроживость; в режиме листа её нет — там кадры выбирает лист.
     const FIDGETS = {
-      stretch: { dur: 2.6, p: 0.30 },   // потягивается: обе руки вверх
-      scratch: { dur: 2.0, p: 0.25 },   // чешет затылок
-      squirm: { dur: 1.1, p: 0.25 },    // ёрзает
-      palm: { dur: 2.4, p: 0.20 },      // смотрит на ладошку
+      stretch: { dur: 2.6, p: 0.24 },   // потягивается: обе руки вверх
+      scratch: { dur: 2.0, p: 0.22 },   // чешет затылок
+      squirm: { dur: 1.1, p: 0.16 },    // ёрзает
+      palm: { dur: 2.4, p: 0.16 },      // смотрит на ладошку
+      hair: { dur: 1.8, p: 0.12 },      // поправляет прядь (этап 11г)
+      shift: { dur: 2.4, p: 0.10 },     // переносит вес с ноги на ногу (11г)
     };
     const PIVX = 20 * PIX, PIVY = 40 * PIX;   // ось наклона — талия
 
@@ -872,10 +876,32 @@ window.FriendAvatar = (function () {
       if (kind === 'stretch') {
         armUpWrap.visible = true; armR.visible = false;
         armUpLeftWrap.visible = true; armL.visible = false;
-      } else if (kind === 'scratch' || kind === 'palm') {
+      } else if (kind === 'scratch' || kind === 'palm' || kind === 'hair') {
         armUpWrap.visible = true; armR.visible = false;
       }
       return kind;
+    }
+
+    // fidgetNow — микродвижение СЕЙЧАС (утреннее потягивание, этап 11г):
+    // те же границы, что у случайного (занятость перекрывает), вернуть false
+    // — не время.
+    function fidgetNow(kind) {
+      if (!FIDGETS[kind]) return false;
+      if (sheet || anim.asleep || anim.walking !== 0 || anim.dance ||
+          anim.waving > 0 || anim.talkUntil > anim.t || anim.yawnUntil > anim.t) {
+        return false;
+      }
+      endFidget();
+      return !!startFidget(kind);
+    }
+
+    // yawn — зевок (этап 11г): глаза закрыты, рот открыт широко и неподвижно,
+    // полторы секунды. Работает и на грани сна (глаза уже закрыты — зевок
+    // читается по рту), на листе кадров не виден.
+    function yawn() {
+      if (sheet) return;
+      if (anim.fidget) endFidget();
+      anim.yawnUntil = anim.t + 1.6;
     }
 
     function endFidget() {
@@ -979,8 +1005,9 @@ window.FriendAvatar = (function () {
         tailR.rotation = -0.03 - Math.sin(anim.t * 1.1 + 0.6) * 0.035;
       }
 
-      // Моргание.
-      if (!anim.asleep && anim.talkUntil < anim.t) {
+      // Моргание. Во время зевка глаза уже закрыты — морганию там нечего
+      // переключать (иначе конец моргания открыл бы глаза посреди зевка).
+      if (!anim.asleep && anim.talkUntil < anim.t && anim.yawnUntil < anim.t) {
         anim.blinkIn -= dt;
         if (anim.blinkIn <= 0) {
           anim.blinkT = 0.12;
@@ -1006,8 +1033,31 @@ window.FriendAvatar = (function () {
         }
       }
 
-      // Разговор: рот открыт примерно половину времени.
-      if (anim.talkUntil > anim.t) {
+      // Зевок (этап 11г): глаза закрыты, пока длится.
+      const yawning = anim.yawnUntil > anim.t;
+      if (yawning !== anim.yawning) {
+        anim.yawning = yawning;
+        if (!sheet) {
+          if (yawning) {
+            closedL.visible = true; closedR.visible = true;
+            left.holder.visible = false; right.holder.visible = false;
+          } else if (!anim.blinking && !anim.asleep) {
+            closedL.visible = false; closedR.visible = false;
+            showEyes(anim.emotion === 'happy' ? 'happy' : 'open');
+          }
+        }
+      }
+
+      // Разговор: рот открыт примерно половину времени; зевок — широко и
+      // неподвижно (не «тараторит»).
+      if (anim.yawnUntil > anim.t) {
+        anim.talkOpen = true;
+        mouths.open.visible = true;
+        mouths.calm.visible = false;
+        mouths.happy.visible = false;
+        mouths.sad.visible = false;
+        mouths.think.visible = false;
+      } else if (anim.talkUntil > anim.t) {
         anim.talkFlip += dt;
         const open = anim.talkFlip % 0.32 < 0.16;
         anim.talkOpen = open;
@@ -1067,8 +1117,9 @@ window.FriendAvatar = (function () {
         anim.fidgetIn -= dt;
         if (anim.fidgetIn <= 0) {
           const r = Math.random();
-          const kind = r < 0.30 ? 'stretch' : r < 0.55 ? 'scratch' :
-            r < 0.80 ? 'squirm' : 'palm';
+          const kind = r < 0.24 ? 'stretch' : r < 0.46 ? 'scratch' :
+            r < 0.62 ? 'squirm' : r < 0.78 ? 'palm' :
+            r < 0.90 ? 'hair' : 'shift';
           startFidget(kind);
           anim.fidgetIn = 30 + Math.random() * 60;
         }
@@ -1088,6 +1139,13 @@ window.FriendAvatar = (function () {
           const w = Math.sin(f.t * 16) * 0.04 * e;
           pivotRotate(w);
           armL.rotation = -w; armR.rotation = w;
+        } else if (f.kind === 'hair') {   // поправляет прядь: рука у волос, пальцы перебирают
+          pivotRotate(0.03 * e);
+          armUpWrap.rotation = (-0.50 + Math.sin(f.t * 14) * 0.05) * e;
+        } else if (f.kind === 'shift') {  // перенос веса: медленный наклон с противоходом рук
+          const w = Math.sin(Math.PI * Math.min(1, f.t / f.dur)) * 0.09 * Math.sin(f.t * 1.6);
+          pivotRotate(w);
+          armL.rotation = -w * 0.7; armR.rotation = w * 0.7;
         } else {   // palm
           pivotRotate(0.10 * e);
           armUpWrap.rotation = -0.78 * e;
@@ -1443,6 +1501,10 @@ window.FriendAvatar = (function () {
       // пиксельной проверки, fidgetArm — подставить таймер автозапуска.
       fidget: function (kind) { return startFidget(kind); },
       fidgetState: function () { return anim.fidget ? anim.fidget.kind : null; },
+      // Микродвижение сейчас (утреннее потягивание, этап 11г) и зевок.
+      fidgetNow: fidgetNow,
+      yawn: yawn,
+      yawnState: function () { return anim.yawnUntil > anim.t; },
       fidgetArm: function (sec) { anim.fidgetIn = Number(sec) || 0; },
       fidgetDebug: function () {
         return {

@@ -2631,6 +2631,58 @@ async function runSelfTest() {
   }
   empathyPart = empathyPart || { ok: false, why: 'нет ответа' };
 
+  // Двадцать седьмая часть: «тело и мимика» (этап 11г). Утреннее потягивание
+  // по требованию (fidgetNow: свободна — потянулась, говорит — отказ),
+  // зевок (глаза закрыты, рот открыт широко, сам кончается), новые
+  // микродвижения пейла (прядь/вес) стартуют и заканчиваются.
+  let bodyPart = null;
+  try {
+    bodyPart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      const av = fa.avatar;
+      if (!av.fidgetNow || !av.yawn) return { ok: false, why: 'нет API 11г' };
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      // Утреннее потягивание: спокойна — потянулась (руки подняты). После
+      // эмпатии она ещё может договаривать реплику: fidgetNow честно отказывает
+      // занятой речью — ждём её окончания (окно речи не дольше 7 с).
+      av.setEmotion(av.calmFace());
+      let st1 = av.fidgetNow('stretch');
+      for (let k = 0; k < 80 && !st1; k++) { await t(100); st1 = av.fidgetNow('stretch'); }
+      await t(150);
+      const mid = av.fidgetDebug();
+      const stMid = st1 && mid.kind === 'stretch' && mid.armUp && mid.armUpL;
+      for (let k = 0; k < 40 && av.fidgetState(); k++) await t(100);
+      // Говорит — потягиваться нельзя: разговор перебивает тело.
+      av.say('достаточно длинная фраза чтобы рот был занят несколько секунд');
+      const stBusy = av.fidgetNow('stretch') === false;
+      // Зевок: глаза закрыты, рот открыт; через две секунды кончился сам.
+      av.yawn();
+      await t(200);
+      const stYawn = av.yawnState() === true;
+      let yawnEnded = false;
+      for (let k = 0; k < 30 && !yawnEnded; k++) { await t(100); yawnEnded = !av.yawnState(); }
+      // Новые микродвижения: прядь и вес стартуют и кончаются.
+      const stHair = !!av.fidget('hair');
+      for (let k = 0; k < 40 && av.fidgetState(); k++) await t(100);
+      const stHairEnd = av.fidgetState() === null;
+      const stShift = !!av.fidget('shift');
+      let shiftEnd = false;
+      for (let k = 0; k < 50 && !shiftEnd; k++) { await t(100); shiftEnd = av.fidgetState() === null; }
+      av.setEmotion(av.calmFace());
+      return {
+        ok: stMid && stBusy && stYawn && yawnEnded && stHair && stHairEnd && stShift && shiftEnd,
+        why: 'потя ' + stMid + ', речь блок ' + stBusy + ', зевок ' + stYawn +
+          ' конец ' + yawnEnded + ', прядь ' + stHair + '/' + stHairEnd +
+          ', вес ' + stShift + '/' + shiftEnd,
+      };
+    })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
+    console.log('[friend] selftest: тело — ' +
+      (bodyPart.ok ? 'OK (' + bodyPart.why + ')' : 'ОШИБКА (' + bodyPart.why + ')'));
+  } catch (err) {
+    console.error('[friend] selftest: тело не проверилось:', err.message);
+  }
+  bodyPart = bodyPart || { ok: false, why: 'нет ответа' };
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
@@ -2654,7 +2706,7 @@ async function runSelfTest() {
 
   console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok && bodyPart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------

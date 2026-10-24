@@ -201,10 +201,13 @@ func (s *Service) Synth(ctx context.Context, text string, rateDelta, pitchDelta,
 	defer cancel()
 	// Внимательно с именами флагов: в edge-tts 7 темп называется --rate
 	// (--speed не принят, CLI падает с exit 2 на распарсенном argv), тон —
-	// --pitch в герцах.
+	// --pitch в герцах. Знаковые значения передаются формой --флаг=значение:
+	// аргумент после пробела («--volume -30%») argparse принимает за опцию
+	// («expected one argument») — ночная «тише на 30%» этим и падала
+	// (замерено живым вызовом); после «=» argparse читает значение всегда.
 	cmd := exec.CommandContext(ctx, s.edge,
-		"--voice", s.voice, "--rate", rateStr, "--pitch", pitchStr,
-		"--volume", volStr,
+		"--voice="+s.voice, "--rate="+rateStr, "--pitch="+pitchStr,
+		"--volume="+volStr,
 		"--text", text, "--write-media", tmp)
 	// В приватный временный каталог служебный файл edge-tts не пишем:
 	// бинарник на Windows создаёт каталог рядом с cwd. Работаем из кэша.
