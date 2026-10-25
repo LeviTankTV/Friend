@@ -54,7 +54,7 @@ jobs:
           sudo apt-get update
           # xfonts-base — bitmap-шрифт fixed: без него xterm не открывается
           # («cannot load font -misc-fixed-…») и проверять нечего.
-          sudo apt-get install -y --no-install-recommends xvfb xterm xfonts-base pulseaudio pulseaudio-utils python3
+          sudo apt-get install -y --no-install-recommends xvfb xterm xfonts-base openbox pulseaudio pulseaudio-utils python3
       - name: Собираем помощников
         run: |
           cd server
@@ -66,11 +66,15 @@ jobs:
         run: |
           export XDG_RUNTIME_DIR=/tmp/xdg-runtime
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          # openbox — минимальный WM: без него на root нет свойства
+          # _NET_ACTIVE_WINDOW и «активное окно» не существует в принципе.
           xvfb-run -a bash -c '
+            openbox & WMPID=$!
+            sleep 2
             xterm -geometry 80x24+10+10 & XPID=$!
             sleep 2
             timeout 8 ./bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
-            kill $XPID 2>/dev/null || true
+            kill $XPID $WMPID 2>/dev/null || true
           '
           echo "--- строки помощника ---"
           cat /tmp/focus-lines.txt
@@ -133,4 +137,4 @@ jobs:
       # --no-sandbox обязателен: на раннере electron живёт под root, и без
       # флага Chromium отказывается стартовать.
       - name: Самопроверка
-        run: cd desktop && xvfb-run -a --server-args="-screen 0 1280x1024x24" npx electron . --selftest --no-sandbox
+        run: cd desktop && xvfb-run -a --server-args="-screen 0 1280x1024x24" bash -c 'openbox & sleep 1; npx electron . --selftest --no-sandbox'

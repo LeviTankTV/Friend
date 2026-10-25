@@ -25,6 +25,12 @@ function binName(name) {
 }
 
 const DEV = process.argv.includes('--dev');
+// dataDir — папка данных Friend: Windows — %AppData%\Friend, Linux/macOS —
+// ~/.config/Friend (тот же os.UserConfigDir, что у сервера). Самопроверке
+// нужны пути к кэшу озвучки и папке спрайтов на любой ОСи.
+const dataDir = process.env.APPDATA
+  ? path.join(process.env.APPDATA, 'Friend')
+  : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Friend');
 // Самопроверка оболочки: прогон перетаскивания без человека (см. runSelfTest).
 const SELFTEST = process.argv.includes('--selftest');
 // Демо-режим: проигрывает «пьесу» (приветствие, ходьба, посадка, танец,
@@ -1802,7 +1808,7 @@ async function runSelfTest() {
   let sheet = { ok: false, why: 'страница не ответила' };
   try {
     const fs = require('fs');
-    const artDir = require('path').join(process.env.APPDATA, 'Friend', 'sprites');
+    const artDir = require('path').join(dataDir, 'sprites');
     fs.mkdirSync(artDir, { recursive: true });
     // Кадры рисуем самой страницей (canvas → PNG), чтобы самопроверке не
     // пришлось везти бинарные литеры чужого арта.
@@ -1948,7 +1954,7 @@ async function runSelfTest() {
     // Путь кэша озвучки — локальный (папка данных рядом с памятью).
     const fs = require('fs');
     const path = require('path');
-    const ttsDir = path.join(process.env.APPDATA, 'Friend', 'tts');
+    const ttsDir = path.join(dataDir, 'tts');
     const cached = fs.existsSync(ttsDir);
     voice.ok = !!(tts && tts.ok) && cached && !!(tts && tts.intOk);
     voice.why = 'голос ' + (tts && tts.voice) + ', mp3 ' + (tts && tts.bytes) + ' байт, ' +
