@@ -52,7 +52,9 @@ jobs:
       - name: Ставим X11, xterm и PulseAudio
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xterm pulseaudio pulseaudio-utils python3
+          # xfonts-base — bitmap-шрифт fixed: без него xterm не открывается
+          # («cannot load font -misc-fixed-…») и проверять нечего.
+          sudo apt-get install -y --no-install-recommends xvfb xterm xfonts-base pulseaudio pulseaudio-utils python3
       - name: Собираем помощников
         run: |
           cd server
@@ -112,8 +114,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Ставим xvfb
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xterm
+      - name: Ставим xvfb и библиотеки Electron
+        run: |
+          sudo apt-get update
+          # Electron'у нужны общие библиотеки рабочего стола; без них процесс
+          # умирает молча до первой строки лога. xfonts-base — шрифт xterm.
+          sudo apt-get install -y --no-install-recommends xvfb xterm xfonts-base \
+            libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 libxtst6 \
+            libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3
       - name: Собираем сервер и помощников
         run: |
           cd server
@@ -122,5 +130,7 @@ jobs:
           go build -o ../bin/soundwatch ./cmd/soundwatch
       - name: npm install
         run: cd desktop && npm install
+      # --no-sandbox обязателен: на раннере electron живёт под root, и без
+      # флага Chromium отказывается стартовать.
       - name: Самопроверка
-        run: cd desktop && xvfb-run -a npx electron . --selftest
+        run: cd desktop && xvfb-run -a --server-args="-screen 0 1280x1024x24" npx electron . --selftest --no-sandbox
