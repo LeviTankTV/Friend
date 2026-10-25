@@ -67,7 +67,7 @@ jobs:
           xvfb-run -a bash -c '
             xterm -geometry 80x24+10+10 & XPID=$!
             sleep 2
-            timeout 8 ../bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
+            timeout 8 ./bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
             kill $XPID 2>/dev/null || true
           '
           echo "--- строки помощника ---"
@@ -90,7 +90,7 @@ jobs:
           w.close()
           EOF
           paplay /tmp/sine.wav &
-          timeout 8 ../bin/soundwatch -interval 300ms | head -n 10 > /tmp/sound-lines.txt
+          timeout 8 ./bin/soundwatch -interval 300ms | head -n 10 > /tmp/sound-lines.txt
           echo "--- строки помощника ---"
           cat /tmp/sound-lines.txt
           grep -Eq '"level":0\.[0-9]{3,}' /tmp/sound-lines.txt

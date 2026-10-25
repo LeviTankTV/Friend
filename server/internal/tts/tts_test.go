@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,12 +16,15 @@ func quietLog() *slog.Logger {
 
 // fakeCLI кладёт в указанный каталог псевдо-edge-tts: скрипт, который пишет
 // «mp3» заданного размера. Тесты не зависят от сети и от настоящего пакета.
+// Windows — .cmd (exec.LookPath ищет расширения через PATHEXT), остальные
+// системы — исполнимый shell-скрипт без расширения.
 func fakeCLI(t *testing.T, dir string) {
 	t.Helper()
-	// Аргументы команды: --voice v --rate r --pitch p --text t --write-media f.
-	// Файл-приёмник — последний токен: в bat %10 — это аргумент 1 и цифра 0,
-	// поэтому забираем его циклом по %*.
-	cmd := `@echo off
+	if runtime.GOOS == "windows" {
+		// Аргументы команды: --voice v --rate r --pitch p --text t --write-media f.
+		// Файл-приёмник — последний токен: в bat %10 — это аргумент 1 и цифра 0,
+		// поэтому забираем его циклом по %*.
+		cmd := `@echo off
 set last=
 for %%f in (%*) do set last=%%f
 set /a n=0
@@ -30,7 +34,22 @@ echo fake-mp3-line>> "%last%"
 if %n% LSS 60 goto loop
 exit /b 0
 `
-	if err := os.WriteFile(filepath.Join(dir, "edge-tts.cmd"), []byte(cmd), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "edge-tts.cmd"), []byte(cmd), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	// Файл-приёмник — значение последнего аргумента (--write-media f).
+	sh := `#!/bin/sh
+last=
+for a in "$@"; do last="$a"; done
+i=0
+while [ "$i" -lt 60 ]; do
+  echo fake-mp3-line >> "$last"
+  i=$((i + 1))
+done
+`
+	if err := os.WriteFile(filepath.Join(dir, "edge-tts"), []byte(sh), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
