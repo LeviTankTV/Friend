@@ -1,5 +1,9 @@
 # Mira — a living companion for your desktop
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/LeviTankTV/Friend)](https://github.com/LeviTankTV/Friend/releases/latest)
+[![CI](https://github.com/LeviTankTV/Friend/actions/workflows/ci.yml/badge.svg)](https://github.com/LeviTankTV/Friend/actions/workflows/ci.yml)
+
 **[README на русском →](README.ru.md)**
 
 Not an assistant. The one who is nearby.
@@ -128,7 +132,7 @@ desktop/  Electron shell: transparent window, tray, helpers, selftest
 ```
 
 Run the full self-check any time: `cd desktop && npx electron . --selftest`
-(27 checks, exit 0 on a healthy machine).
+(29 checks, exit 0 on a healthy machine).
 
 ## Roadmap
 

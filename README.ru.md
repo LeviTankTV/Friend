@@ -1,5 +1,9 @@
 # Мира — живой компаньон для рабочего стола
 
+[![Лицензия: MIT](https://img.shields.io/badge/Лицензия-MIT-yellow.svg)](LICENSE)
+[![Релиз](https://img.shields.io/github/v/release/LeviTankTV/Friend)](https://github.com/LeviTankTV/Friend/releases/latest)
+[![CI](https://github.com/LeviTankTV/Friend/actions/workflows/ci.yml/badge.svg)](https://github.com/LeviTankTV/Friend/actions/workflows/ci.yml)
+
 **[README in English →](README.md)**
 
 Не ассистент. Та, кто рядом.
@@ -124,7 +128,7 @@ desktop/  Оболочка Electron: прозрачное окно, трей, п
 ```
 
 Полную самопроверку можно гнать в любой момент: `cd desktop && npx
-electron . --selftest` (27 проверок, на здоровой машине exit 0).
+electron . --selftest` (29 проверок, на здоровой машине exit 0).
 
 ## План
 

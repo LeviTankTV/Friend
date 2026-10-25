@@ -58,7 +58,7 @@
 >
 > Go server (pure Go SQLite, no cgo) + vanilla JS/PixiJS character + thin
 > Electron shell. Windows/Linux/macOS, installers in Releases. Self-test:
-> 27 checks, exit 0. Repo in comments — feedback welcome, especially on the
+> 29 checks, exit 0. Repo in comments — feedback welcome, especially on the
 > proactive scheduler (it's a pure function over inputs, easy to hack on).
 
 ### RU (ДТФ/Пикабу)
@@ -80,7 +80,7 @@
 >
 > Сервер на Go (SQLite без cgo), персонаж — ванильный JS + PixiJS,
 > оболочка — тонкий Electron. Windows/Linux/macOS, установщики в Releases.
-> Самопроверка: 27 проверок, exit 0.
+> Самопроверка: 29 проверок, exit 0.
 
 ---
 
@@ -130,7 +130,7 @@ patterns, speaks aloud and hears her name (locally).
 - Her personality is a single editable JSON; her look can be replaced with
   your own sprite sheet
 - Russian and English out of the box (`avatar.language`)
-- 27-part self-test (`npx electron . --selftest`)
+- 29-part self-test (`npx electron . --selftest`)
 
 **Known limits (by design, see README table):** no Wayland window tracking,
 no system-audio loopback on macOS, macOS shows app names without window

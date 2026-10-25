@@ -23,3 +23,7 @@ nul
 /dist/
 /dist2/
 /dist.old-lock/
+
+# Состояние дев-прогонов: память/проактив, написанные живыми проверками.
+fast-memory.json
+fast-proactive.json
