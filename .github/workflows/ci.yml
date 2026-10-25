@@ -3,7 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   go:
@@ -138,3 +143,60 @@ jobs:
       # флага Chromium отказывается стартовать.
       - name: Самопроверка
         run: cd desktop && xvfb-run -a --server-args="-screen 0 1280x1024x24" bash -c 'openbox & sleep 1; npx electron . --selftest --no-sandbox'
+
+  # Сборка установщиков на всех трёх ОСях (electron-builder). На main —
+  # артефакты, чтобы видеть живость сборки; на теге v* — ещё и в черновик
+  # релиза с приложенными установщиками.
+  packaging:
+    name: Установщики (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      # extraResources берёт ../bin: без свежих Go-бинарей установщик
+      # соберётся пустым внутри — собираем в том же job.
+      - name: Сборка сервера и помощников
+        run: |
+          cd server
+          go build -o ../bin/companion ./cmd/companion
+          go build -o ../bin/focuswatch ./cmd/focuswatch
+          go build -o ../bin/soundwatch ./cmd/soundwatch
+      - name: npm ci
+        run: cd desktop && npm ci
+      - name: electron-builder (win)
+        if: matrix.os == 'windows-latest'
+        run: cd desktop && npx electron-builder --win --publish never
+      - name: electron-builder (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: cd desktop && npx electron-builder --linux --publish never
+      - name: electron-builder (mac)
+        if: matrix.os == 'macos-latest'
+        run: cd desktop && npx electron-builder --mac --publish never
+      - name: Артефакты установщиков
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: dist/*
+      # Черновик релиза: человек открывает draft, правит текст
+      # (готовый — docs/launch/posts.md) и публикует.
+      - name: В черновик релиза (только тег)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*
+          generate_release_notes: true
+

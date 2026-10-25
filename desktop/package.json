@@ -5,6 +5,7 @@
   "private": true,
   "author": "LeviTankTV",
   "description": "Mira — живой компаньон на рабочий стол: прозрачное окно поверх всех, память и характер",
+  "homepage": "https://github.com/LeviTankTV/Friend",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,10 +13,12 @@
     "go": "node ../scripts/build-go.js",
     "dist": "npm run go && electron-builder"
   },
+  "dependencies": {
+    "gifenc": "^1.0.3"
+  },
   "devDependencies": {
     "electron": "^32.2.0",
-    "electron-builder": "^24.13.3",
-    "gifenc": "^1.0.3"
+    "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "dev.friend.companion",
@@ -56,6 +59,7 @@
         }
       ],
       "category": "public.app-category.lifestyle",
+      "identity": null,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Микрофон нужен для голосового ввода и отклика по имени; запись распознаётся локально и не покидает компьютер"
       }
@@ -65,7 +69,13 @@
         "AppImage",
         "deb"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "synopsis": "Живой компаньон на рабочий стол: характер, память, забота — локально",
+      "maintainer": "LeviTankTV <LeviTankTV@users.noreply.github.com>",
+      "desktop": {
+        "Name": "Mira",
+        "Comment": "Живой компаньон на рабочий стол"
+      }
     }
   }
 }

@@ -44,9 +44,6 @@ contextBridge.exposeInMainWorld('friendNative', {
   // Автозапуск при входе в систему: invoke, а не send — странице важен ответ
   // «применилось ли», меню показывает правдивый чекбокс.
   autostart: (on) => ipcRenderer.invoke('app:autostart', on),
-  // id дорожки системного микшера для «танцует под музыку» (js/music.js):
-  // invoke — странице нужен ответ (источника может не быть).
-  audioSource: () => ipcRenderer.invoke('app:audio-source'),
   // Настройки: прочитанные при старте и запись при изменении. Канал send: они
   // сохраняются на каждое движение ползунка, ответ странице не нужен.
   settings: storedSettings,
