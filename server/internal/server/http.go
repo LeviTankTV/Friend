@@ -89,6 +89,57 @@ func New(opts Options) (*http.Server, error) {
 	})
 	mux.HandleFunc("/ws", opts.Hub.HandleWS)
 
+	// Память напоказ: человек видит, что она запомнила по его же словам, и
+	// может удалить любой факт. Право «забыть» — у того, кому запомнили.
+	// Сервер локальный (127.0.0.1): эти данные наружу не идут вовсе.
+	memory := func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			facts, total, err := opts.Hub.ListFacts(offset, limit)
+			if err != nil {
+				http.Error(w, "память не читается: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			type factJSON struct {
+				ID      int64  `json:"id"`
+				Text    string `json:"text"`
+				Created string `json:"created"`
+			}
+			out := make([]factJSON, 0, len(facts))
+			for _, f := range facts {
+				out = append(out, factJSON{f.ID, f.Text, f.Created.Format(time.RFC3339)})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(map[string]any{"facts": out, "total": total})
+		case http.MethodDelete:
+			idStr := strings.TrimPrefix(r.URL.Path, "/memory/")
+			id, err := strconv.ParseInt(idStr, 10, 64)
+			if idStr == "" || idStr == r.URL.Path || err != nil {
+				http.Error(w, "удаление факта: DELETE /memory/{id}", http.StatusBadRequest)
+				return
+			}
+			gone, err := opts.Hub.ForgetFact(id)
+			if err != nil {
+				http.Error(w, "факт не удалился: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !gone {
+				http.Error(w, "такого факта уже нет", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "id": id})
+		default:
+			http.Error(w, "память показывают GET-ом, удаляют DELETE-ом", http.StatusMethodNotAllowed)
+		}
+	}
+	mux.HandleFunc("/memory", memory)
+	mux.HandleFunc("/memory/", memory)
+
 	// Внешний арт (этап 6): страница сама решает, есть ли лист — она просит
 	// /sprites/sheet.json и получает 404, когда человек арт не подкладывал.
 	// Поэтому здесь просто каталог, как и весь фронтенд — без кэша: правки

@@ -55,8 +55,22 @@
     'action.talk': 'talk',
     'action.wave': 'wave',
     'action.home': 'home',
+    'action.memory': 'what she knows',
     'action.quit': 'quit',
     'menu.hint': 'right click — menu, drag — move, wheel — size',
+
+    // main.js: memory panel
+    'memory.aria': 'remembered facts',
+    'memory.title': 'what she knows',
+    'memory.count': 'remembers: {n}',
+    'memory.empty': 'nothing remembered yet. Say "remember: …"',
+    'memory.delete': '✕',
+    'memory.deleteAria': 'delete this fact',
+    'memory.more': 'show more',
+    'memory.close': 'close',
+    'memory.hint': 'facts live in a local SQLite file and never leave the machine',
+    'memory.err': 'memory did not load: {reason}',
+    'memory.errDelete': 'the fact did not delete: {reason}',
 
     // main.js
     'wake.dotTitle': '{name} listens only for her name: audio is transcribed locally and never recorded',

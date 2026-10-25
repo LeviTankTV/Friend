@@ -132,7 +132,7 @@ desktop/  Electron shell: transparent window, tray, helpers, selftest
 ```
 
 Run the full self-check any time: `cd desktop && npx electron . --selftest`
-(29 checks, exit 0 on a healthy machine).
+(30 checks, exit 0 on a healthy machine).
 
 ## Roadmap
 

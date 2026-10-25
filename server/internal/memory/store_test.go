@@ -257,3 +257,66 @@ func TestRecallEnglish(t *testing.T) {
 		t.Fatalf("запрос из стоп-слов — свежие факты, а не пустота: %+v", facts)
 	}
 }
+
+func TestListFactsPagination(t *testing.T) {
+	s := open(t)
+	for i, txt := range []string{"первый", "второй", "третий", "четвёртый"} {
+		if _, err := s.Remember(txt, "user", at.Add(time.Duration(i)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, total, err := s.ListFacts(1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 4 || len(page) != 2 {
+		t.Fatalf("total=%d len=%d, ожидал 4/2", total, len(page))
+	}
+	// свежие сверху: id DESC — «четвёртый», «третий», «второй», «первый»;
+	// offset=1 limit=2 → «третий», «второй»
+	if page[0].Text != "третий" || page[1].Text != "второй" {
+		t.Fatalf("страница не по свежести: %+v", page)
+	}
+	if !page[0].Created.Equal(at.Add(2 * time.Hour)) {
+		t.Fatalf("created не распарсился: %+v", page[0])
+	}
+}
+
+func TestForgetKeepsFTSClean(t *testing.T) {
+	s := open(t)
+	id, err := s.Remember("Кота зовут Барсик", "user", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, _ := s.Remember("Любит джаз", "user", at.Add(time.Hour))
+	gone, err := s.Forget(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gone {
+		t.Fatal("Forget вернул false у существующего факта")
+	}
+	found, err := s.Recall("Барсик", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("после удаления FTS находит удалённый: %+v", found)
+	}
+	if got := s.FactCount(); got != 1 {
+		t.Fatalf("FactCount=%d, ожидал 1", got)
+	}
+	// живой факт находится по-прежнему
+	found2, _ := s.Recall("джаз", 5)
+	if len(found2) != 1 || found2[0].ID != id2 {
+		t.Fatalf("выживший факт потерялся: %+v", found2)
+	}
+	// повторное удаление — false, не ошибка
+	gone2, err := s.Forget(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gone2 {
+		t.Fatal("повторный Forget вернул true у удалённого факта")
+	}
+}

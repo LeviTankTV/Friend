@@ -281,12 +281,185 @@
     onOpen: () => growForMenu(true),
     onClose: () => growForMenu(false),
     onTalk: () => window.friendChat && window.friendChat.toggle(),
+    onMemory: () => window.friendMemory && window.friendMemory.open(),
     onWave: () => avatar.wave(),
     onHome: () => goHome(),
     onQuit: () => { if (bridge.quit) bridge.quit(); },
     name: '',
   });
   document.body.classList.add('menu-ready');
+
+  // --- панель памяти: «что она знает» (пункт меню → список с удалением) ----
+  //
+  // Факты записывает сервер («запомни:», internal/memory), а человек имеет
+  // право не только диктовать, но и посмотреть и стереть: данные-то его.
+  // Сервер даёт GET /memory (страница с offset/limit) и DELETE /memory/{id};
+  // всё локально, наружу эти данные не ходят. Окно расширяется тем же
+  // механизмом, что и меню (growForMenu): панель живёт в той же боковой полосе.
+  const memory = (function () {
+    const panel = document.createElement('div');
+    panel.className = 'memory';
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    const title = document.createElement('div');
+    title.className = 'menu-title';
+    panel.appendChild(title);
+    const count = document.createElement('div');
+    count.className = 'memory-count';
+    panel.appendChild(count);
+    const list = document.createElement('div');
+    panel.appendChild(list);
+    const empty = document.createElement('div');
+    empty.className = 'memory-empty';
+    empty.hidden = true;
+    panel.appendChild(empty);
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'memory-more';
+    more.hidden = true;
+    panel.appendChild(more);
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'memory-close';
+    panel.appendChild(closeBtn);
+    const hint = document.createElement('div');
+    hint.className = 'menu-hint';
+    panel.appendChild(hint);
+    document.body.appendChild(panel);
+
+    const LIMIT = 30;
+    let open = false;
+    let total = 0;
+    let shown = 0;
+
+    function labels() {
+      title.textContent = friendLang.L('memory.title');
+      count.textContent = total > 0 ? friendLang.L('memory.count', { n: total }) : '';
+      panel.setAttribute('aria-label', friendLang.L('memory.aria'));
+      empty.textContent = friendLang.L('memory.empty');
+      more.textContent = friendLang.L('memory.more');
+      closeBtn.textContent = friendLang.L('memory.close');
+      hint.textContent = friendLang.L('memory.hint');
+    }
+    labels();
+
+    function renderFact(f) {
+      const row = document.createElement('div');
+      row.className = 'memory-fact';
+      row.dataset.id = String(f.id);
+      const text = document.createElement('span');
+      text.textContent = f.text;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = friendLang.L('memory.delete');
+      del.title = friendLang.L('memory.deleteAria');
+      del.setAttribute('aria-label', friendLang.L('memory.deleteAria'));
+      del.addEventListener('click', () => {
+        fetch('/memory/' + f.id, { method: 'DELETE' })
+          .then((resp) => {
+            if (resp.ok || resp.status === 404) {
+              // 404 — факта уже нет (например, стёрт в другой сессии).
+              row.remove();
+              total = Math.max(0, total - 1);
+              count.textContent = total > 0 ? friendLang.L('memory.count', { n: total }) : '';
+              if (!list.children.length) empty.hidden = false;
+              return;
+            }
+            return resp.text().then((t) => {
+              hint.textContent = friendLang.L('memory.errDelete', { reason: t.trim() || String(resp.status) });
+            });
+          })
+          .catch((err) => {
+            hint.textContent = friendLang.L('memory.errDelete', { reason: String(err) });
+          });
+      });
+      row.appendChild(text);
+      row.appendChild(del);
+      list.appendChild(row);
+    }
+
+    function load() {
+      hint.textContent = friendLang.L('memory.hint');
+      return fetch('/memory?limit=' + LIMIT)
+        .then((resp) => {
+          if (!resp.ok) return resp.text().then((t) => { throw new Error(t.trim() || String(resp.status)); });
+          return resp.json();
+        })
+        .then((data) => {
+          list.textContent = '';
+          total = data.total;
+          shown = data.facts.length;
+          data.facts.forEach(renderFact);
+          empty.hidden = data.facts.length > 0;
+          more.hidden = shown >= total;
+          labels();
+        })
+        .catch((err) => {
+          hint.textContent = friendLang.L('memory.err', { reason: String(err) });
+        });
+    }
+
+    more.addEventListener('click', () => {
+      fetch('/memory?limit=' + LIMIT + '&offset=' + shown)
+        .then((resp) => {
+          if (!resp.ok) return resp.text().then((t) => { throw new Error(t.trim() || String(resp.status)); });
+          return resp.json();
+        })
+        .then((data) => {
+          data.facts.forEach(renderFact);
+          shown += data.facts.length;
+          more.hidden = shown >= total;
+        })
+        .catch((err) => {
+          hint.textContent = friendLang.L('memory.err', { reason: String(err) });
+        });
+    });
+
+    function openPanel() {
+      if (open) return;
+      open = true;
+      panel.hidden = false;
+      document.body.classList.add('menu-open');
+      labels();
+      growForMenu(true);
+      load();
+      if (bridge.focus) bridge.focus();
+    }
+
+    function closePanel() {
+      if (!open) return;
+      open = false;
+      panel.hidden = true;
+      document.body.classList.remove('menu-open');
+      growForMenu(false);
+    }
+
+    closeBtn.addEventListener('click', closePanel);
+    // Клик «мимо панели» закрывает её, как меню; внутри панели — не закрывает.
+    window.addEventListener('pointerdown', (ev) => {
+      if (!open) return;
+      if (panel.contains(ev.target)) return;
+      closePanel();
+    }, true);
+    window.addEventListener('keydown', (ev) => {
+      if (!open) return;
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closePanel();
+      }
+    }, true);
+
+    return {
+      isOpen: () => open,
+      open: openPanel,
+      close: closePanel,
+      // setLanguage — перерисовать подписи панели на теперешний язык
+      // (тот же принцип, что у меню и чата).
+      setLanguage: labels,
+    };
+  })();
+  window.friendMemory = memory;
 
   // applySize — размер персонажа. Спрайт масштабируется целиком (сетка та же),
   // окно подгоняется под новый размер, а её ноги остаются на месте: иначе
@@ -1303,6 +1476,7 @@
       applyLang();
       if (chat.setLanguage) chat.setLanguage();
       if (menu.setLanguage) menu.setLanguage();
+      if (window.friendMemory) window.friendMemory.setLanguage();
     }
     if (av.name) {
       personaName = av.name;

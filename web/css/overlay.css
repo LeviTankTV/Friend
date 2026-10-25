@@ -335,6 +335,63 @@ body:not(.menu-left):not(.menu-right) .menu { left: 6px; }
 
 .menu-hint { margin-top: 9px; font-size: 10.5px; opacity: 0.5; line-height: 1.3; }
 
+/* Панель памяти «что она знает» (js/main.js): та же боковая полоса, что и у
+   меню, окно растёт тем же механизмом (growForMenu). Список с удалением —
+   право «забыть» принадлежит тому, кому запомнили. */
+.memory {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 244px;
+  max-width: calc(100vw - 12px);
+  overflow-y: auto;
+  padding: 9px 10px 8px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: rgba(18, 22, 34, 0.94);
+  border: 1px solid rgba(169, 201, 255, 0.22);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: #eef1f8;
+  font-size: 12.5px;
+  line-height: 1.35;
+  z-index: 7;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.memory[hidden] { display: none; }
+body.menu-left .memory { left: 6px; }
+body.menu-right .memory { right: 6px; }
+body:not(.menu-left):not(.menu-right) .memory { left: 6px; }
+.memory::-webkit-scrollbar { width: 5px; }
+.memory::-webkit-scrollbar-thumb { background: rgba(238, 241, 248, 0.25); border-radius: 3px; }
+
+.memory-count { opacity: 0.65; font-size: 11.5px; margin: 4px 0 6px; }
+.memory-fact {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 6px 2px;
+  border-bottom: 1px solid rgba(169, 201, 255, 0.12);
+}
+.memory-fact span { flex: 1; word-break: break-word; font-size: 12px; }
+.memory-fact button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(169, 201, 255, 0.22);
+  background: rgba(30, 38, 62, 0.9);
+  color: #eef1f8;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.memory-fact button:hover { background: rgba(120, 60, 70, 0.9); }
+.memory-empty { opacity: 0.6; font-size: 11.5px; padding: 10px 2px; }
+.memory-more { display: block; width: 100%; margin-top: 8px; }
+.memory-close { display: block; width: 100%; margin-top: 6px; }
+
 /* Пока открыто меню, облачко и поле ввода прячутся: они делят с ним место в
    окне, и два слоя текста одновременно нечитаемы. */
 body.menu-open .bubble,

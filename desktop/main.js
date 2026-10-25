@@ -2693,6 +2693,59 @@ async function runSelfTest() {
   }
   bodyPart = bodyPart || { ok: false, why: 'нет ответа' };
 
+  // Тридцатая часть: «что она знает» — панель памяти. Факт пишется командой
+  // «запомни:» (путь сервера работает без модели), панель открывается через
+  // API страницы, факт виден в списке, кнопка удаления на строке реально
+  // сносит строку и сам факт из памяти.
+  let memoryPart = null;
+  try {
+    memoryPart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      fa.net.send({ type: 'say', text: 'запомни: кита зовут Барсик-тест' });
+      let fact = null;
+      for (let k = 0; k < 60 && !fact; k++) {
+        await t(200);
+        const r = await fetch('/memory?limit=100').then((x) => x.json());
+        fact = r.facts.find((f) => f.text.indexOf('Барсик-тест') >= 0) || null;
+      }
+      if (!fact) return { ok: false, why: 'факт не запомнился (нет связи с сервером?)' };
+      if (!window.friendMemory) return { ok: false, why: 'нет панели памяти' };
+      window.friendMemory.open();
+      let row = null;
+      for (let k = 0; k < 50 && !row; k++) {
+        await t(100);
+        row = document.querySelector('.memory-fact[data-id="' + fact.id + '"]');
+      }
+      const inPanel = !!row && (row.textContent || '').indexOf('Барсик-тест') >= 0;
+      const delBtn = row ? row.querySelector('button') : null;
+      let removed = false;
+      if (delBtn) {
+        delBtn.click();
+        for (let k = 0; k < 50 && !removed; k++) {
+          await t(100);
+          removed = !document.querySelector('.memory-fact[data-id="' + fact.id + '"]');
+        }
+      }
+      window.friendMemory.close();
+      let gone = false;
+      for (let k = 0; k < 20 && !gone; k++) {
+        await t(100);
+        const r2 = await fetch('/memory?limit=100').then((x) => x.json());
+        gone = !r2.facts.some((f) => f.id === fact.id);
+      }
+      return {
+        ok: inPanel && removed && gone,
+        why: 'в панели ' + inPanel + ', строка снялась ' + removed + ', из памяти вышла ' + gone,
+      };
+    })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
+    console.log('[friend] selftest: память — ' +
+      (memoryPart.ok ? 'OK (' + memoryPart.why + ')' : 'ОШИБКА (' + memoryPart.why + ')'));
+  } catch (err) {
+    console.error('[friend] selftest: память не проверилась:', err.message);
+  }
+  memoryPart = memoryPart || { ok: false, why: 'нет ответа' };
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
@@ -2716,7 +2769,7 @@ async function runSelfTest() {
 
   console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok && bodyPart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok && bodyPart.ok && memoryPart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------

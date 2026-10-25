@@ -297,6 +297,45 @@ func (s *Store) recentFacts(limit int) ([]Fact, error) {
 	return scanFacts(rows)
 }
 
+// ListFacts — страница фактов для человека («что она знает»): свежие сверху,
+// offset/limit — постраничная выдача; total — сколько всего, чтобы страница
+// понимала, есть ли ещё.
+func (s *Store) ListFacts(offset, limit int) ([]Fact, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM facts`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.Query(
+		`SELECT id, text, created FROM facts ORDER BY id DESC LIMIT ? OFFSET ?`,
+		limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out, err := scanFacts(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// Forget удаляет факт по id. Флаг — был ли факт (404 для несуществующего).
+// ФTS-индекс поддерживает удаление сам (триггер facts_ad на таблице facts).
+func (s *Store) Forget(id int64) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM facts WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // scanFacts — общий разбор строк фактов.
 func scanFacts(rows *sql.Rows) ([]Fact, error) {
 	var out []Fact

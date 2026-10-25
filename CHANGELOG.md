@@ -3,6 +3,15 @@
 All notable changes to this project are documented here.
 The dev diary with measurements lives in [PLAN.md](PLAN.md).
 
+## [Unreleased]
+
+- **Memory browser.** Right-click menu → «what she knows»: a panel listing
+  every fact she stored from your own words, with per-fact delete. Server
+  endpoints `GET /memory` / `DELETE /memory/{id}` (127.0.0.1 only). The
+  right to forget belongs to the person the facts came from.
+- Self-test grew to 30 parts: the new part seeds a fact via `запомни:`,
+  opens the panel, deletes the row, verifies the fact left memory.
+
 ## [0.1.0] — 2026-10-25
 
 First public release. Mira is complete across all planned stages:
@@ -42,4 +51,3 @@ First public release. Mira is complete across all planned stages:
   dictionary registry)
 - Character gallery / sharing personalities
 - More proactive care patterns (weekly rhythms, follow-ups on old facts)
-- Memory browser UI (view / delete what she remembers)

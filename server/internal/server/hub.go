@@ -19,6 +19,7 @@ import (
 	"friend/internal/focus"
 	"friend/internal/i18n"
 	"friend/internal/llm"
+	"friend/internal/memory"
 	"friend/internal/mood"
 	"friend/internal/moodread"
 	"friend/internal/state"
@@ -129,10 +130,30 @@ func (h *Hub) setUserState(s string) {
 type MemoryStore interface {
 	Remember(text, source string, at time.Time) (int64, error)
 	Archive(role, text string, at time.Time) error
+	ListFacts(offset, limit int) ([]memory.Fact, int, error)
+	Forget(id int64) (bool, error)
 }
 
 // SetMemory подключает долгую память (команда «запомни:»).
 func (h *Hub) SetMemory(m MemoryStore) { h.memory = m }
+
+// ListFacts — страница фактов для человека (GET /memory): что она запомнила
+// по его же словам. Nil-безопасно: без памяти — пустая страница.
+func (h *Hub) ListFacts(offset, limit int) ([]memory.Fact, int, error) {
+	if h.memory == nil {
+		return nil, 0, nil
+	}
+	return h.memory.ListFacts(offset, limit)
+}
+
+// ForgetFact — удаление факта человеком (DELETE /memory/{id}): право на
+// «забыть» должно быть у того, кому она запомнила, а не только на «запомни».
+func (h *Hub) ForgetFact(id int64) (bool, error) {
+	if h.memory == nil {
+		return false, nil
+	}
+	return h.memory.Forget(id)
+}
 
 // SetMoodEvents подключает канал внутреннего состояния (этап 5): реплика
 // человека превращается в событие mood.EvUser.
