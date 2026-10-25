@@ -5,7 +5,7 @@
   var L = (window.FRIEND_LANG = window.FRIEND_LANG || {});
   L.en = {
     // index.html / main.js: каркас страницы
-    'app.title': 'Friend — companion',
+    'app.title': 'Mira',
     'app.stageAria': 'Companion',
     'hud.linkTitle': 'connection to server',
     'hud.hint': 'click — talk to her, drag — move her',

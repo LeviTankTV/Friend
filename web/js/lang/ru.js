@@ -5,7 +5,7 @@
   var L = (window.FRIEND_LANG = window.FRIEND_LANG || {});
   L.ru = {
     // index.html / main.js: каркас страницы
-    'app.title': 'Friend — компаньон',
+    'app.title': 'Мира',
     'app.stageAria': 'Персонаж',
     'hud.linkTitle': 'связь с сервером',
     'hud.hint': 'клик — поговорить, тяни — переехать',

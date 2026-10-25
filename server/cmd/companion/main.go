@@ -193,7 +193,7 @@ func run() error {
 	log.Info("фронтенд", "dir", web)
 
 	hub := server.NewHub(log, store, cfg.Avatar, comp)
-	hub.SetKeyHint(keyHint(model, envRes))
+	hub.SetKeyHint(keyHint(model, envRes, dotenv.Candidates(cwd(), config.DataDir())))
 	hub.SetFocusTracker(tracker)
 	if mem != nil {
 		// Долгая память: «запомни:» в хабе, факты и архив реплик в компаньоне.
@@ -308,14 +308,26 @@ func cwd() string {
 
 // keyHint — что сказать человеку, если ключа нет.
 //
-// Текст собирается здесь, потому что путь к файлу ключей знает только
-// запускающий код; хаб только показывает его в окне.
-func keyHint(m *llm.Client, env dotenv.Result) string {
+// Текст собирается здесь, потому что пути к файлу ключей знает только
+// запускающий код; хаб только показывает его в окне. Подсказка путь-осознанная:
+// у установщика нет start.bat — человек ставит .env в папку данных
+// (%AppData%\Friend), у запустившего из исходников — рядом со start.bat.
+// «Перезапусти приложение» вместо «перезапусти start.bat»: у установщика
+// это просто закрыть и открыть Миру.
+func keyHint(m *llm.Client, env dotenv.Result, candidates []string) string {
 	envName := strings.TrimSpace(m.KeyEnv())
 	if env.Found() {
-		return "Впиши ключ в " + env.Path + " строкой " + envName + "=... и запусти start.bat снова."
+		return "Впиши ключ в " + env.Path + " строкой " + envName + "=... и перезапусти приложение."
 	}
-	return "Создай файл .env рядом со start.bat со строкой " + envName + "=... (или задай переменную окружения) и запусти start.bat снова."
+	// Первый кандидат вне ресурсов установки: resources\.env у упакованного
+	// приложения не место — перезапишется обновлением.
+	for _, p := range candidates {
+		if strings.Contains(p, "resources") {
+			continue
+		}
+		return "Создай файл " + p + " со строкой " + envName + "=... (или задай переменную окружения) и перезапусти приложение."
+	}
+	return "Создай файл .env со строкой " + envName + "=... (или задай переменную окружения) и перезапусти приложение."
 }
 
 // proactiveLoop — сердце инициативы (этап 4).
