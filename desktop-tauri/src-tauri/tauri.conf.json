@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mira",
+  "version": "0.1.0",
+  "identifier": "dev.friend.companion",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "appimage", "deb", "dmg"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "resources": ["../../bin/*"]
+  }
+}

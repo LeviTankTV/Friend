@@ -1,0 +1,15 @@
+{
+  "name": "friend-tauri",
+  "productName": "Mira",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mira — оболочка Tauri вместо Electron: страница и Go-сервер те же",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

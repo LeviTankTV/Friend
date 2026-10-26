@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Страница Миры с сервера 127.0.0.1: окна, события, автозапуск. Remote-доступ обязателен: страница живёт на http://127.0.0.1:8787, а не в ассетах оболочки",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1", "http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:event:default",
+    "core:webview:default",
+    "core:app:default"
+  ]
+}
