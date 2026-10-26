@@ -270,6 +270,12 @@
       if (key === 'keepTop' && bridge.setAlwaysOnTop) bridge.setAlwaysOnTop(value);
       if (key === 'follow') applyFollow(value);
       if (key === 'dance') applyDance(value);
+      // Смена языка (этап 13): человек выбрал ru/en — просим сервер. Сервер
+      // пересоберёт характер/голос/wake и рассыл lang дойдёт до всех окон,
+      // перекрасив и эту страницу тоже.
+      if (key === 'language' && (value === 'ru' || value === 'en')) {
+        net.send({ type: 'lang', language: value });
+      }
       // Автозапуск — дело оболочки (ключ автозапуска Windows). Если применить
       // не удалось, снимаем галку: меню не должно показывать то, чего нет.
       if (key === 'autostart' && bridge.setAutostart) {
@@ -1465,6 +1471,20 @@
     }
   });
 
+  // Смена языка на сервере (этап 13): broadcast lang доходит до всех окон —
+  // переставляем словарь, перекрашиваем подписи, собранные один раз, и
+  // обновляем кнопки языка в меню. Язык общий у всех окон, поэтому ответ
+  // приходит broadcast-ом, а не в ответ одному клиенту.
+  net.on('lang', (msg) => {
+    const code = msg.language === 'en' ? 'en' : 'ru';
+    friendLang.set(code);
+    applyLang();
+    if (chat.setLanguage) chat.setLanguage();
+    if (menu.setLanguage) menu.setLanguage();
+    if (window.friendMemory) window.friendMemory.setLanguage();
+    menu.setLang(code);
+  });
+
   let appliedOnce = false;
   net.on('welcome', (msg) => {
     const av = msg.avatar || {};
@@ -1477,6 +1497,14 @@
       if (chat.setLanguage) chat.setLanguage();
       if (menu.setLanguage) menu.setLanguage();
       if (window.friendMemory) window.friendMemory.setLanguage();
+    }
+    // Синхрон сохранённого языка (этап 13): язык в конфиге сервера мог
+    // не совпасть с прошлым выбором человека в меню — выбор человека
+    // первее, страница просит сервер сменить язык, сервер ответит lang
+    // broadcast-ом и всё перекрасится целиком (голос и характер тоже).
+    const savedLang = menu.settings().language;
+    if ((savedLang === 'ru' || savedLang === 'en') && savedLang !== (av.language || 'ru')) {
+      net.send({ type: 'lang', language: savedLang });
     }
     if (av.name) {
       personaName = av.name;

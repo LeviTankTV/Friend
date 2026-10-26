@@ -9,8 +9,13 @@ The dev diary with measurements lives in [PLAN.md](PLAN.md).
   every fact she stored from your own words, with per-fact delete. Server
   endpoints `GET /memory` / `DELETE /memory/{id}` (127.0.0.1 only). The
   right to forget belongs to the person the facts came from.
-- Self-test grew to 30 parts: the new part seeds a fact via `запомни:`,
-  opens the panel, deletes the row, verifies the fact left memory.
+- **Live language switch.** Right-click menu → RU/EN: no restart. The server
+  reloads the character file for the new language, swaps prompt dictionaries,
+  voice, wake matcher and STT language, and broadcasts `lang` to every window;
+  the choice persists in settings and re-applies on the next start.
+- Self-test grew to 31 parts: memory (seed a fact via `запомни:`, delete it
+  through the panel, verify it left memory) and language (en → ru round-trip
+  checked on the page, in the menu buttons and in `/healthz`).
 
 ## [0.1.0] — 2026-10-25
 

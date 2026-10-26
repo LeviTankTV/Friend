@@ -182,3 +182,37 @@ func TestVolumeSeparateCache(t *testing.T) {
 		t.Fatal("тихая версия обязана жить отдельным файлом кэша")
 	}
 }
+
+func TestSetLanguageVoice(t *testing.T) {
+	// Голос из конфига не задан — язык им и управляет.
+	s := New(nil, false, "", "+0%", "", "ru")
+	s.mu.Lock()
+	base := s.voice
+	s.mu.Unlock()
+	if base != "ru-RU-SvetlanaNeural" {
+		t.Fatalf("ru-голос: %q", base)
+	}
+	s.SetLanguage("en")
+	s.mu.Lock()
+	got := s.voice
+	s.mu.Unlock()
+	if got != "en-US-JennyNeural" {
+		t.Fatalf("en-голос: %q", got)
+	}
+	s.SetLanguage("ru")
+	s.mu.Lock()
+	got = s.voice
+	s.mu.Unlock()
+	if got != "ru-RU-SvetlanaNeural" {
+		t.Fatalf("обратный ru-голос: %q", got)
+	}
+	// Голос из конфига — человек выбрал сам, язык его не перекрашивает.
+	fixed := New(nil, false, "de-DE-KatjaNeural", "+0%", "", "ru")
+	fixed.SetLanguage("en")
+	fixed.mu.Lock()
+	gotFixed := fixed.voice
+	fixed.mu.Unlock()
+	if gotFixed != "de-DE-KatjaNeural" {
+		t.Fatalf("конфигурационный голос поехал: %q", gotFixed)
+	}
+}

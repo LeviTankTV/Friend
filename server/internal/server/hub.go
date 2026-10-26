@@ -101,6 +101,9 @@ type Hub struct {
 	// разрешает фоновому слушателю работать (и тот требует отдельного
 	// переключателя в меню). Nil — функция выключена.
 	wake *WakeInfo
+	// langHook — что пересобрать при смене языка (этап 13): характер,
+	// голос, STT. Ставится из main.go: он один знает, где лежат их источники.
+	langHook func(code string)
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
@@ -124,6 +127,40 @@ func (h *Hub) setUserState(s string) {
 	h.mu.Lock()
 	h.userState = s
 	h.mu.Unlock()
+}
+
+// langOf — текущий язык персонажа (ru|en) под мьютексом: avatar.Language
+// живёт (этап 13), читатель промптов и писатель из ws-горутины встречаются.
+func (h *Hub) langOf() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.avatar.Language
+}
+
+// Language — текущий язык персонажа ("ru" | "en"); наружу (healthz, welcome).
+func (h *Hub) Language() string { return h.langOf() }
+
+// SetLangHook подключает пересборку языкозависимого (этап 13): хаб один
+// знает про wake и язык, а характер, голос и STT знает только запускающий
+// код — он и говорит, что делать со сменой языка.
+func (h *Hub) SetLangHook(fn func(code string)) { h.langHook = fn }
+
+// SetLanguage — живая смена языка персонажа (этап 13): язык в аватаре,
+// матчер её имени, характер/голос/STT через хук, и ответный lang всем окнам.
+// Неизвестный код = «ru» (как i18n.For).
+func (h *Hub) SetLanguage(code string) {
+	if code != "en" {
+		code = "ru"
+	}
+	h.mu.Lock()
+	h.avatar.Language = code
+	h.wakeM = wake.New(h.avatar.Name, code)
+	h.mu.Unlock()
+	if h.langHook != nil {
+		h.langHook(code)
+	}
+	h.log.Info("язык поменялся", "language", code)
+	h.Broadcast(LangMsg{Type: TypeLang, Language: code})
 }
 
 // MemoryStore — долгая память для хаба (реализация — internal/memory.Store).
@@ -170,11 +207,29 @@ func (h *Hub) SetSTT(v *STTInfo) { h.stt = v }
 // SetWake сообщает хабу про wake word (этап 7): флаг попадает в welcome.
 func (h *Hub) SetWake(v *WakeInfo) { h.wake = v }
 
+// SetName — имя персонажа из характера (этап 13): характер англоязычный —
+// имя «Mira», русскоязычный — «Мира». С именем строится матчер её имени
+// (wake), поэтому пересобираем его сразу.
+func (h *Hub) SetName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	h.mu.Lock()
+	h.avatar.Name = name
+	h.wakeM = wake.New(name, h.avatar.Language)
+	h.mu.Unlock()
+}
+
 // WakeMatch — прозвучало ли в тексте её имя (этап 10: имя и язык — из
 // конфига; правила узнавания — internal/wake, там же тесты на живых
 // находках whisper — съеденные гласные, латинские двойники, падежи).
+// Матчер меняется при смене языка (этап 13), поэтому читается под мьютексом.
 func (h *Hub) WakeMatch(text string) bool {
-	return h.wakeM.Mention(text)
+	h.mu.Lock()
+	m := h.wakeM
+	h.mu.Unlock()
+	return m.Mention(text)
 }
 
 // HandleWake — в речевом сегменте с /wake прозвучало её имя (wake word,
@@ -214,6 +269,11 @@ func (h *Hub) HandleWake(heard string) {
 // NewHub собирает хаб. responder может быть nil — тогда разговор выключен
 // (окно скажет об этом прямо, а не будет молчать).
 func NewHub(log *slog.Logger, store *state.Store, avatar config.Avatar, responder Responder) *Hub {
+	// Язык нормализуем на входе (этап 13): пустой или битый код = «ru»,
+	// как в i18n.For. Welcome обязан несть язык всегда.
+	if avatar.Language != "en" {
+		avatar.Language = "ru"
+	}
 	return &Hub{
 		log:       log,
 		store:     store,
@@ -533,7 +593,7 @@ func parseRemember(text string) (string, bool) {
 // handleRemember — команда «запомни:»: факт в память, подтверждение в окно.
 // Без ключа модели работает: память локальная, модель здесь не нужна.
 func (h *Hub) handleRemember(c *wsClient, whole, fact string) {
-	d := i18n.For(h.avatar.Language)
+	d := i18n.For(h.langOf())
 	if h.memory == nil {
 		c.sendTo(ReplyErrorMsg{Type: TypeReplyError, Error: d.ErrNoMemory})
 		return
@@ -708,7 +768,7 @@ func (h *Hub) handle(c *wsClient, in Incoming) {
 			State:      h.store.Snapshot(),
 			Avatar: AvatarInfo{
 				Name:     h.avatar.Name,
-				Language: h.avatar.Language,
+				Language: h.Language(),
 				Width:    h.avatar.Width,
 				Height:   h.avatar.Height,
 				Sprite:   h.avatar.Sprite,
@@ -740,6 +800,14 @@ func (h *Hub) handle(c *wsClient, in Incoming) {
 		h.handleFocus(in)
 	case TypePing:
 		c.sendTo(PongMsg{Type: TypePong, ServerTime: time.Now().UTC()})
+	case TypeLang:
+		// Живая смена языка (этап 13): код из меню страницы. Отвечаем не
+		// одному окну, а Broadcast-ом — язык общий у всех окон.
+		code := in.Language
+		if code != "en" {
+			code = "ru"
+		}
+		h.SetLanguage(code)
 	default:
 		c.sendTo(ErrorMsg{Type: TypeError, Error: "неизвестный тип сообщения: " + in.Type})
 	}

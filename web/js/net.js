@@ -25,6 +25,8 @@ window.FriendNet = (function () {
     thinking: [], reply: [], reply_error: [],
     // Wake word (этап 7): в речевом сегменте прозвучало её имя.
     wake: [],
+    // Смена языка (этап 13): сервер рассылает lang всем окнам.
+    lang: [],
   };
   let ws = null;
   let retryTimer = null;
@@ -94,6 +96,10 @@ window.FriendNet = (function () {
         case 'wake':
           // Прозвучало её имя (этап 7) — окно будит её и отвечает на имя.
           emit('wake', msg);
+          break;
+        case 'lang':
+          // Язык поменялся (этап 13): broadcast всем окнам.
+          emit('lang', msg);
           break;
         case 'pong':
           state.lastPong = Date.now();

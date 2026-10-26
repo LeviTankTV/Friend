@@ -115,3 +115,27 @@ func TestJSONRoundTrip(t *testing.T) {
 		t.Fatalf("формат ответа сломан: %s → %+v", raw, back)
 	}
 }
+
+func TestSetLanguageStt(t *testing.T) {
+	s := New(nil, false, "", "", "en")
+	s.mu.Lock()
+	lang := s.lang
+	s.mu.Unlock()
+	if lang != "en" {
+		t.Fatalf("en при создании: %q", lang)
+	}
+	s.SetLanguage("ru")
+	s.mu.Lock()
+	lang = s.lang
+	s.mu.Unlock()
+	if lang != "ru" {
+		t.Fatalf("SetLanguage ru: %q", lang)
+	}
+	s.SetLanguage("de")
+	s.mu.Lock()
+	lang = s.lang
+	s.mu.Unlock()
+	if lang != "ru" {
+		t.Fatalf("неизвестный код должен давать ru, получил %q", lang)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"friend/internal/chat"
@@ -38,9 +39,13 @@ type Model interface {
 
 // Companion отвечает на реплики человека.
 type Companion struct {
-	profile persona.Profile
-	model   Model
-	sess    *chat.Session
+	// profile под мьютексом: язык поменялся живьём (этап 13) — характер
+	// пересобирается, а горoutine ответа читает его прямо во время сборки
+	// промпта.
+	profileMu sync.RWMutex
+	profile   persona.Profile
+	model     Model
+	sess      *chat.Session
 	now     func() time.Time
 	// context — источник «обстановки на момент ответа»: строки про текущее
 	// приложение человека и другие живые обстоятельства (сон, еда — этап 4).
@@ -103,6 +108,22 @@ func (c *Companion) SetMoodSource(fn func() mood.State) { c.mood = fn }
 // Строку собирает вызывающий — у него память и язык.
 func (c *Companion) SetPatternsSource(fn func() string) { c.patterns = fn }
 
+// profileOf — текущий характер под мьютексом (этап 13): горoutine ответа
+// читает профиль, SetProfile пишет — встречается на живом переключении языка.
+func (c *Companion) profileOf() persona.Profile {
+	c.profileMu.RLock()
+	defer c.profileMu.RUnlock()
+	return c.profile
+}
+
+// SetProfile меняет характер живьём (этап 13, смена языка): все будущие
+// промпты собираются из нового профиля.
+func (c *Companion) SetProfile(p persona.Profile) {
+	c.profileMu.Lock()
+	c.profile = p
+	c.profileMu.Unlock()
+}
+
 // rememberInstruction — как просить модель сжать разговор в саммари (этап 3).
 // Просьба намеренно про человека и его жизнь: так из разговора остаётся то,
 // что пригодится в следующий раз, а не её собственные реплики. Текст — в
@@ -119,7 +140,7 @@ func (c *Companion) Summarize(ctx context.Context, convo string) (string, error)
 	if !c.model.Ready() {
 		return "", fmt.Errorf("%w — %s", llm.ErrNoKey, c.model.Status())
 	}
-	prompt := c.profile.SystemPrompt(c.now())
+	prompt := c.profileOf().SystemPrompt(c.now())
 	msgs := []llm.Message{
 		{Role: "system", Content: prompt},
 		{Role: "user", Content: fmt.Sprintf(c.dict().SummarizeInstruction, convo)},
@@ -238,14 +259,17 @@ func (c *Companion) memoryMessages(query string) []llm.Message {
 func (c *Companion) messagesWithQuery(query string) []llm.Message {
 	history := c.sess.Messages()
 	d := c.dict()
-	prompt := c.profile.SystemPrompt(c.now())
+	// Снимок характера на время сборки промпта (этап 13): язык может
+	// поменяться в середине сборки — промпт обязан быть цельным по языку.
+	prof := c.profileOf()
+	prompt := prof.SystemPrompt(c.now())
 	if c.context != nil {
 		if ctx := strings.TrimSpace(c.context()); ctx != "" {
 			prompt += d.CtxHeader + ctx
 		}
 	}
 	if c.mood != nil {
-		if line := mood.Describe(c.mood(), c.profile.Language); line != "" {
+		if line := mood.Describe(c.mood(), prof.Language); line != "" {
 			prompt += "\n\n" + line
 		}
 	}
@@ -276,7 +300,7 @@ func (c *Companion) messagesWithQuery(query string) []llm.Message {
 }
 
 // dict — словарь языка персоны.
-func (c *Companion) dict() *i18n.Dict { return i18n.For(c.profile.Language) }
+func (c *Companion) dict() *i18n.Dict { return i18n.For(c.profileOf().Language) }
 
 // usWord — код тона (moodread.Tired…) в слово промпта на языке словаря.
 func usWord(d *i18n.Dict, code string) string {
@@ -365,4 +389,4 @@ func (c *Companion) Status() string { return c.model.Status() }
 func (c *Companion) Timeout() time.Duration { return c.model.Timeout() }
 
 // Name — имя персонажа (для логов и окна).
-func (c *Companion) Name() string { return c.profile.Name }
+func (c *Companion) Name() string { return c.profileOf().Name }

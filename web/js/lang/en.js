@@ -59,6 +59,11 @@
     'action.quit': 'quit',
     'menu.hint': 'right click — menu, drag — move, wheel — size',
 
+    // main.js: language switch (stage 13). Labels stay in their own language.
+    'lang.aria': 'language',
+    'lang.ru': 'Русский',
+    'lang.en': 'English',
+
     // main.js: memory panel
     'memory.aria': 'remembered facts',
     'memory.title': 'what she knows',

@@ -105,8 +105,9 @@ Go 1.24+ and Node 18+.
 - **Her look**: ship your own sprite sheet (PNG frames + a `sheet.json`)
   and she'll use it instead of the built-in pixel art — walk, blink, sleep,
   dance frames all just work.
-- **Her language**: `avatar.language: "ru" | "en"` switches the UI, the
-  prompts, the voice and the wake word together.
+- **Her language**: RU/EN in the right-click menu, live — she re-reads her
+  character file, swaps prompts, voice and wake word, no restart.
+  `avatar.language: "ru" | "en"` in the config sets the starting language.
 
 ## Honest limitations
 
@@ -133,7 +134,7 @@ desktop/  Electron shell: transparent window, tray, helpers, selftest
 ```
 
 Run the full self-check any time: `cd desktop && npx electron . --selftest`
-(30 checks, exit 0 on a healthy machine).
+(31 checks, exit 0 on a healthy machine).
 
 ## Roadmap
 

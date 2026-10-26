@@ -94,6 +94,17 @@ type recognized struct {
 	Error string `json:"error"`
 }
 
+// SetLanguage — язык распознавания за языком персоны (этап 13, живая смена
+// языка): человек переключил ru/en в меню — шепталка должна слышать по-новому.
+func (s *Service) SetLanguage(lang string) {
+	if lang != "en" {
+		lang = "ru"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lang = lang
+}
+
 // Recognize расшифровывает WAV по пути. Последовательно (модель грузится на
 // каждый запрос и требует эксклюзивного доступа к памяти), с таймаутом:
 // запись короче минуты, расшифровка — секунды.

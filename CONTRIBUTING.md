@@ -27,7 +27,7 @@ Requirements: Go 1.24+, Node 18+.
 
 ```bash
 cd server && go vet ./... && go test ./...   # 23 packages, all green
-cd desktop && npx electron . --selftest      # 30 checks, exit 0
+cd desktop && npx electron . --selftest      # 31 checks, exit 0
 ```
 
 CI runs both on Windows/Linux/macOS. The Windows `go vet` warning on the

@@ -38,6 +38,9 @@ window.FriendMenu = (function () {
                          // без явного желания человека нельзя, поэтому выкл
     dance: false,        // «реакция на звук»: слушать системный микшер —
                          // лишняя фоновая служба без спроса человека, выкл
+    language: '',        // язык персонажа ('' = как в конфиге сервера).
+                         // Смена живая (этап 13): страница просит сервер,
+                         // сервер пересобирает характер и рассылает lang.
   };
 
   // Посадки — только идентификаторы: подписи и подсказки живут в словаре
@@ -48,6 +51,12 @@ window.FriendMenu = (function () {
     { id: 'window' },
     { id: 'edge-left' },
     { id: 'edge-right' },
+  ];
+
+  // Языки — идентификаторы, подписи в словаре (как посадки).
+  const LANGS = [
+    { id: 'ru' },
+    { id: 'en' },
   ];
 
   // pick — привести сохранённое к значениям по умолчанию: чужие поля и не тот тип
@@ -70,6 +79,9 @@ window.FriendMenu = (function () {
     // научилась на окна сажать, — без проверки на список настройка проходила
     // pick и посадка «висела» несуществующей.
     if (typeof saved.seat !== 'string' || !SEAT_KEYS[saved.seat]) out.seat = DEFAULTS.seat;
+    // Язык: только 'ru'/'en' (или '' = как в конфиге). Мусорная строка не
+    // должна уезжать на сервер как запрос смены языка.
+    if (saved.language !== 'ru' && saved.language !== 'en') out.language = '';
     return out;
   }
 
@@ -159,6 +171,25 @@ window.FriendMenu = (function () {
     followRow.appendChild(followInput);
     followRow.appendChild(followValue);
     panel.appendChild(followRow);
+
+    // Язык (этап 13): две кнопки, подписи всегда на своём языке. Клик —
+    // запрос к серверу (onChange → lang), сервер пересобирает характер,
+    // голос и wake, и рассылает lang всем окнам.
+    const langGroup = el('div', 'menu-label menu-group', friendLang.L('lang.aria'));
+    panel.appendChild(langGroup);
+    const langRow = el('div', 'menu-seats');
+    const langButtons = {};
+    for (const lang of LANGS) {
+      const btn = el('button', 'menu-seat');
+      btn.type = 'button';
+      btn.textContent = friendLang.L('lang.' + lang.id);
+      btn.addEventListener('click', () => {
+        apply('language', lang.id);
+      });
+      langButtons[lang.id] = btn;
+      langRow.appendChild(btn);
+    }
+    panel.appendChild(langRow);
 
     // Куда посадить.
     const seatGroup = el('div', 'menu-label menu-group', friendLang.L('menu.groupSeat'));
@@ -258,6 +289,15 @@ window.FriendMenu = (function () {
         seatButtons[id].setAttribute('aria-pressed', on ? 'true' : 'false');
       }
       for (const id of Object.keys(checkboxes)) checkboxes[id].checked = !!settings[id];
+      // Кнопки языка: подсвечиваем ТЕКУЩИЙ язык страницы ('' = серверный из
+      // конфига, он же язык словаря) — меню не показывает выбранным то,
+      // чего нет.
+      const effLang = settings.language || friendLang.code();
+      for (const id of Object.keys(langButtons)) {
+        const on = effLang === id;
+        langButtons[id].classList.toggle('on', on);
+        langButtons[id].setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
     }
 
     sizeInput.addEventListener('input', () => apply('pix', Number(sizeInput.value)));
@@ -365,7 +405,18 @@ window.FriendMenu = (function () {
         }
         for (const t of toggles) toggleLabels[t.id].textContent = friendLang.L('toggle.' + t.id);
         for (const a of actionButtons) a.btn.textContent = friendLang.L(a.key);
+        langGroup.textContent = friendLang.L('lang.aria');
+        for (const lang of LANGS) langButtons[lang.id].textContent = friendLang.L('lang.' + lang.id);
         hint.textContent = friendLang.L('menu.hint');
+      },
+      // setLang — язык поменялся НЕ от клика по меню: сервер прислал lang
+      // (окно могло быть второе, язык мог смениться на старте по сохранённой
+      // настройке). Записываем и перекрашиваем кнопки.
+      setLang: function (code) {
+        if (code !== 'ru' && code !== 'en') return;
+        settings.language = code;
+        persist();
+        sync();
       },
       panel: panel,
     };

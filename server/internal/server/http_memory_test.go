@@ -200,3 +200,38 @@ func TestMemoryDeleteFlow(t *testing.T) {
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
+
+// /healthz несёт язык персонажа (этап 13): им меряет самопроверка, что
+// переключение из меню дошло до сервера.
+func TestHealthzCarriesLanguage(t *testing.T) {
+	ts, hub, _ := newMemoryHTTP(t)
+	resp, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Language string `json:"language"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Language != "ru" {
+		t.Fatalf("language=%q, ожидал ru", out.Language)
+	}
+	hub.SetLanguage("en")
+	resp2, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var out2 struct {
+		Language string `json:"language"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&out2); err != nil {
+		t.Fatal(err)
+	}
+	if out2.Language != "en" {
+		t.Fatalf("language=%q, ожидал en", out2.Language)
+	}
+}

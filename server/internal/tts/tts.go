@@ -36,9 +36,13 @@ type Service struct {
 	mu    sync.Mutex
 	edge  string // путь к CLI edge-tts; пусто = не установлен
 	voice string
-	speed string
-	cache string
-	log   *slog.Logger
+	// cfgVoice — голос из конфига (voice.edge_voice). Пусто — голос следует
+	// языку персоны и меняется вместе с ним (SetLanguage, этап 13); задан —
+	// человек выбрал голос сам, язык его не перекрашивает.
+	cfgVoice string
+	speed    string
+	cache    string
+	log      *slog.Logger
 }
 
 // New собирает службу. enabled=false или отсутствие edge-tts в PATH —
@@ -50,7 +54,8 @@ func New(log *slog.Logger, enabled bool, voice, speed, cacheDir, lang string) *S
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Service{voice: strings.TrimSpace(voice), speed: strings.TrimSpace(speed), cache: cacheDir, log: log}
+	s := &Service{voice: strings.TrimSpace(voice), cfgVoice: strings.TrimSpace(voice),
+		speed: strings.TrimSpace(speed), cache: cacheDir, log: log}
 	if s.voice == "" {
 		if strings.EqualFold(strings.TrimSpace(lang), "en") {
 			s.voice = "en-US-JennyNeural"
@@ -88,7 +93,26 @@ func (s *Service) Voice() string {
 	if !s.Available() {
 		return ""
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.voice
+}
+
+// SetLanguage — голос за языком персонажа (этап 13, живая смена языка):
+// ru → Svetlana, en → Jenny. Голос, выбранный человеком в конфиге
+// (voice.edge_voice), языком не перекрашивается.
+func (s *Service) SetLanguage(lang string) {
+	if s.cfgVoice != "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.EqualFold(strings.TrimSpace(lang), "en") {
+		s.voice = "en-US-JennyNeural"
+	} else {
+		s.voice = "ru-RU-SvetlanaNeural"
+	}
+	s.log.Info("голос за языком", "voice", s.voice)
 }
 
 // cachePath — файл кэша по хэшу голоса, темпа, тона, громкости и текста.

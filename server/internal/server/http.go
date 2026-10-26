@@ -67,6 +67,9 @@ func New(opts Options) (*http.Server, error) {
 			"ok":       true,
 			"protocol": protocolVersion,
 			"clients":  opts.Hub.Count(),
+			// Язык персонажа — наружу (этап 13): им оперирует самопроверка,
+			// человек смотрит живьём после переключения из меню.
+			"language": opts.Hub.Language(),
 			// Сохранённая позиция видна снаружи: по ней самопроверка оболочки
 			// проверяет, что окно не «запомнило» точку за пределами экрана.
 			"position": opts.Hub.Position(),

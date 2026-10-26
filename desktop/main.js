@@ -1509,9 +1509,14 @@ async function runSelfTest() {
       const panel = document.querySelector('.menu');
       const opened = app.menu.isOpen() && panel && !panel.hidden;
       const panelFits = panel ? panel.getBoundingClientRect().width > 100 : false;
-      // Размер — ползунком, как это делает человек.
       const slider = panel ? panel.querySelector('input[type=range]') : null;
       if (!slider) return { ok: false, why: 'в меню нет ползунка размера' };
+      // Размер — ползунком, как это делает человек. Но меряем от ИЗВЕСТНОГО
+      // размера: у человека pix может быть 11, и тогда «8 из 11» рост не
+      // покажет (находка живого прогона 2026-10-26). Приводим к 5, меряем 5→8.
+      slider.value = '5';
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 700));
       const before = app.avatar.width;
       slider.value = '8';
       slider.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2118,6 +2123,27 @@ async function runSelfTest() {
     //    выше которого окно физически не влезает), по горизонтали — внутри окна.
     moveWindow(300, 300);
     await new Promise((r) => setTimeout(r, 250));
+    // Нормализуем размер: страница перезагружалась (части «рисование» и
+    // «лист кадров»), а перезагрузка возвращает настройки к СНИМКУ НА МОМЕНТ
+    // ЗАПУСКА оболочки (аргументы preload). У человека pix=11 — и весь
+    // минимум ног (PAD_TOP+высота спрайта = 700) перекрывал кромки мишеней
+    // (500/560). Находка прогона 2026-10-26; продуктовая сторона (после
+    // крэш-восстановления настройки откатываются, хотя файл свежий) —
+    // отдельная работа, здесь чиним только меру.
+    try {
+      await win.webContents.executeJavaScript(`(async () => {
+        const app = window.friendApp;
+        if (app.menu.settings().pix !== 5) {
+          const panel = document.querySelector('.menu');
+          const slider = panel && panel.querySelector('input[type=range]');
+          if (slider) {
+            slider.value = '5';
+            slider.dispatchEvent(new Event('input', { bubbles: true }));
+            await new Promise((r) => setTimeout(r, 700));
+          }
+        }
+      })()`);
+    } catch (_err) { /* дальше проверки скажут сами */ }
     let menuSeat = null;
     try {
       menuSeat = await win.webContents.executeJavaScript(`(async () => {
@@ -2267,7 +2293,13 @@ async function runSelfTest() {
           if (i % 10 === 9) { fa.menu.setSeat('window'); await fa.applySeat('window'); }
           a2 = fa.anchor();
         }
-        return { ok: Math.abs(a2.y - T.y) <= 3 && a2.x >= T.x && a2.x <= T.x + T.w, ay: Math.round(a2.y), ty: T.y, ax: Math.round(a2.x) };
+        const fw = fa.focusWin();
+        const wam = await fa.bridge.workArea();
+        return { ok: Math.abs(a2.y - T.y) <= 3 && a2.x >= T.x && a2.x <= T.x + T.w, ay: Math.round(a2.y), ty: T.y, ax: Math.round(a2.x),
+          fwy: fw ? fw.y : null, seat: fa.menu.settings().seat,
+          pix: fa.menu.settings().pix, ah: Math.round(fa.avatar.height || 0),
+          way: wam.y, wah: wam.height, waw: wam.width,
+          why: Math.abs(a2.y - T.y) <= 3 ? '' : 'не доехала: якорь y=' + Math.round(a2.y) + ', мишень y=' + T.y + ', строка мишени y=' + (fw ? fw.y : 'нет') };
       })()`);
     } catch (err) {
       console.error('[friend] selftest: смена мишени не проверилась:', err.message);
@@ -2503,12 +2535,30 @@ async function runSelfTest() {
         legs[1].length === 2 &&
         legs[1][0][0] + legs[0][1][1] === 39 &&
         legs[1][0][1] + legs[0][1][0] === 39;
+      // Стартуем от ИЗВЕСТНОГО места — левого края рабочей области: где она
+      // стоит у человека, знать нельзя, а потолок прогона (26 с) длинный
+      // переезд срезал ровно до «размах 604 из 1288» (находка 2026-10-26).
+      const waStart = await fa.bridge.workArea();
+      const curStart = await fa.bridge.getPosition();
+      // Пересадка без синхронизации внутренних координат страницы бесполезна:
+      // прогулка едет от старого winPos и первым же тиком перекрывает окно
+      // (находка прогона: setPosition без anchorFromWindow окно не двигал).
+      const moved = await fa.bridge.setPosition(waStart.x + 4, curStart.y);
+      if (moved && typeof moved.x === 'number') { fa.anchorFromWindow(moved); }
+      await new Promise((r) => setTimeout(r, 400));
+      const stops = [];
+      const origLog = console.log;
+      console.log = function (...a) {
+        const s = a.join(' ');
+        if (s.indexOf('прогулка кончилась') >= 0 || s.indexOf('не едет') >= 0) stops.push(s);
+        origLog.apply(console, a);
+      };
       fa.stopWalk('перед маршрутом');
       fa.walkRoute(8);
       const t = (ms) => new Promise((r) => setTimeout(r, ms));
       let minx = 1e9, maxx = -1e9, sawTurn = false, lastDir = 0, ended = false;
       const t0 = Date.now();
-      while (Date.now() - t0 < 26000 && !ended) {
+      while (Date.now() - t0 < 34000 && !ended) {
         const p = await fa.bridge.getPosition();
         if (p && typeof p.x === 'number') { minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x); }
         const d = fa.avatar.walking();
@@ -2519,6 +2569,7 @@ async function runSelfTest() {
       }
       const walking = fa.avatar.walking();
       fa.stopWalk('самопроверка кончила маршрут');
+      console.log = origLog;
       const pf = await fa.bridge.getPosition();
       const wa = await fa.bridge.workArea();
       const full = wa.width - 248;
@@ -2528,7 +2579,8 @@ async function runSelfTest() {
           pf.x >= wa.x - 2 && pf.x + 248 <= wa.x + wa.width + 2,
         why: 'размах ' + range + ' из ' + full + ', разворот ' + sawTurn +
           ', ноги ' + JSON.stringify(legs) + ' зеркало ' + legMirrored +
-          ', конец ' + ended + ', финал ' + pf.x,
+          ', конец ' + ended + ', финал ' + pf.x +
+          (stops.length ? '; остановки: ' + stops.join(' | ') : ''),
       };
     })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
     console.log('[friend] selftest: ходьба по экрану — ' +
@@ -2746,6 +2798,47 @@ async function runSelfTest() {
   }
   memoryPart = memoryPart || { ok: false, why: 'нет ответа' };
 
+  // Тридцать первая часть: живая смена языка (этап 13). Просим сервер
+  // пересобрать язык (lang в канал), проверяем, что страница перекрасилась
+  // (словарь + подписи меню), сервер показывает новый язык (healthz), и
+  // что обратный переход возвращает всё назад.
+  let langPart = null;
+  try {
+    langPart = await win.webContents.executeJavaScript(`(async () => {
+      const fa = window.friendApp;
+      const t = (ms) => new Promise((r) => setTimeout(r, ms));
+      fa.net.send({ type: 'lang', language: 'en' });
+      let en = false;
+      for (let k = 0; k < 60 && !en; k++) {
+        await t(100);
+        const h = await fetch('/healthz').then((x) => x.json());
+        en = h.language === 'en';
+      }
+      const pageEn = window.friendLang.code() === 'en' &&
+        window.friendLang.L('action.talk') === 'talk';
+      const btnOn = document.querySelector('.menu-seats .menu-seat.on');
+      fa.net.send({ type: 'lang', language: 'ru' });
+      let ru = false;
+      for (let k = 0; k < 60 && !ru; k++) {
+        await t(100);
+        const h2 = await fetch('/healthz').then((x) => x.json());
+        ru = h2.language === 'ru' && window.friendLang.code() === 'ru';
+      }
+      const saved = JSON.parse(localStorage.getItem('friend.settings.v1') || '{}');
+      return {
+        ok: en && pageEn && ru,
+        why: 'сервер en ' + en + ', страница en ' + pageEn +
+          ' (кнопка ' + (btnOn && btnOn.textContent) + '), возврат ru ' + ru +
+          ', сохранено ' + (saved.language || ''),
+      };
+    })()`).catch((err) => ({ ok: false, why: 'окно страницы: ' + err.message }));
+    console.log('[friend] selftest: язык — ' +
+      (langPart.ok ? 'OK (' + langPart.why + ')' : 'ОШИБКА (' + langPart.why + ')'));
+  } catch (err) {
+    console.error('[friend] selftest: язык не проверился:', err.message);
+  }
+  langPart = langPart || { ok: false, why: 'нет ответа' };
+
   // Настройки возвращаем те, что были ДО проверки: она трогает ползунок размера
   // и посадку, а это выбор человека, а не тестовые данные. Иначе после каждого
   // прогона её размер и посадка сбрасывались бы к тестовым значениям.
@@ -2769,7 +2862,7 @@ async function runSelfTest() {
 
   console.log('[friend] selftest: маяк — выход');
   app.exit(agree.ok && dragged && gated && sizeHeld && dragAccurate && chat.ok && pet.ok &&
-    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok && bodyPart.ok && memoryPart.ok ? 0 : 1);
+    sleep.ok && mood.ok && walk.ok && poke.ok && menuTest.ok && windowVisible && savedVisible && focusChain.ok && vanish.ok && sheet.ok && voice.ok && stt.ok && wake.ok && trayPart.ok && seatPart.ok && gaze.ok && musicPart.ok && idlePart.ok && routePart.ok && fidgetPart.ok && empathyPart.ok && bodyPart.ok && memoryPart.ok && langPart.ok ? 0 : 1);
 }
 
 // --- Жизненный цикл -------------------------------------------------------

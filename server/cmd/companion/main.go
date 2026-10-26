@@ -119,6 +119,13 @@ func run() error {
 	}
 	log.Info(personaNote, "язык", profile.Language)
 
+	// Живой язык персонажа (этап 13): переключение из меню не требует
+	// перезапуска. Замыкания, собирающие промпт, читают curLang(); хук
+	// SetLanguage пишет его вместе с характером, голосом и STT.
+	var langState atomic.Value
+	langState.Store(profile.Language)
+	curLang := func() string { return langState.Load().(string) }
+
 	// Имя в окне берём из характера: переименовал персонажа в его файле —
 	// подпись в окне меняется вместе с ним, а не остаётся старой из конфига.
 	if profile.Name != "" && profile.Name != cfg.Avatar.Name {
@@ -142,7 +149,7 @@ func run() error {
 			return ""
 		}
 		// Язык строки обстановки — язык персоны (этап 10): промпт цельный.
-		return focus.Line(s, time.Now(), profile.Language)
+		return focus.Line(s, time.Now(), curLang())
 	})
 
 	store, err := state.Open(cfg.Paths.StateFile)
@@ -239,6 +246,23 @@ func run() error {
 	if wakeOn {
 		hub.SetWake(&server.WakeInfo{Available: true, Engine: "faster-whisper"})
 	}
+	// Живая смена языка (этап 13): хук знает, где лежат характер, голос и STT.
+	// Характер грузится заново под новый язык; если не поднялся — остаётся
+	// прежний (язык тоже не трогаем: характер и язык должны ездить вместе).
+	hub.SetLangHook(func(code string) {
+		p, note, err := persona.LoadFor(cfg.Persona.File, code)
+		if err != nil {
+			log.Warn("характер не пересобрался на новый язык — остаётся прежний",
+				"язык", code, "err", err)
+			return
+		}
+		langState.Store(code)
+		comp.SetProfile(p)
+		hub.SetName(p.Name)
+		voiceSvc.SetLanguage(code)
+		sttSvc.SetLanguage(code)
+		log.Info(note, "язык", p.Language)
+	})
 	srv, err := server.New(server.Options{Addr: cfg.Server.Addr, WebDir: web, SpritesDir: cfg.Paths.SpritesDir, TTS: voiceSvc, STT: sttSvc, STTDir: filepath.Join(filepath.Dir(cfg.Paths.StateFile), "stt"), Wake: wakeOn, Log: log, Hub: hub})
 	if err != nil {
 		return err
@@ -267,11 +291,11 @@ func run() error {
 		if !ok || !patterns.Notable(n) {
 			return ""
 		}
-		return fmt.Sprintf(i18n.For(profile.Language).PLateNights, i18n.CountNights(profile.Language, n))
+		return fmt.Sprintf(i18n.For(curLang()).PLateNights, i18n.CountNights(curLang(), n))
 	})
 
 	go proactiveLoop(ctx, log, sched, comp, hub, sess, tracker, mem, store,
-		moodEvents, moodGet, moodSet, time.Duration(cfg.Proactive.TickSeconds)*time.Second, profile.Language)
+		moodEvents, moodGet, moodSet, time.Duration(cfg.Proactive.TickSeconds)*time.Second, curLang)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -366,7 +390,7 @@ func lateNightsNow(mem *memory.Store) (int, bool) {
 func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Scheduler,
 	comp *companion.Companion, hub *server.Hub, sess *chat.Session, tracker *focus.Tracker,
 	mem *memory.Store, store *state.Store, moodEvents <-chan mood.Event,
-	moodGet func() mood.State, moodSet func(mood.State), tick time.Duration, lang string) {
+	moodGet func() mood.State, moodSet func(mood.State), tick time.Duration, lang func() string) {
 	if tick <= 0 {
 		tick = 30 * time.Second
 	}
@@ -440,7 +464,7 @@ func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Sched
 		}
 		prevPart = part
 
-		in := proactive.Inputs{Now: now, Language: lang}
+		in := proactive.Inputs{Now: now, Language: lang()}
 		if n, ok := lateNightsNow(mem); ok {
 			in.LateNights = n
 		}

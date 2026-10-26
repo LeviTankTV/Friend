@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"friend/internal/chat"
+	"friend/internal/i18n"
 	"friend/internal/llm"
 	"friend/internal/memory"
 	"friend/internal/mood"
@@ -532,5 +533,27 @@ func TestPatternsLineInPrompt(t *testing.T) {
 	}
 	if strings.Contains(m.got[0][0].Content, "ночей") {
 		t.Fatal("пустой паттерн не оставляет строки в промпте")
+	}
+}
+
+// SetProfile (этап 13, живая смена языка): характер меняется на лету,
+// имя и словарь промптов — вместе с ним.
+func TestSetProfileSwapsCharacter(t *testing.T) {
+	m := &fakeModel{ready: true, answer: "ok"}
+	ru := persona.Profile{Name: "Мира", Language: "ru"}
+	c := New(ru, m, nil)
+	if c.Name() != "Мира" {
+		t.Fatalf("имя до смены: %q", c.Name())
+	}
+	en := persona.Profile{Name: "Mira", Language: "en"}
+	c.SetProfile(en)
+	if c.Name() != "Mira" {
+		t.Fatalf("имя после смены: %q", c.Name())
+	}
+	if c.dict() == nil || c.dict().LangNameAny == "" {
+		t.Fatal("словарь после смены пустой")
+	}
+	if c.dict() != i18n.For("en") {
+		t.Fatal("словарь не переехал на en")
 	}
 }
