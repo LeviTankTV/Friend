@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld('friendNative', {
   // сохраняются на каждое движение ползунка, ответ странице не нужен.
   settings: storedSettings,
   saveSettings: (json) => ipcRenderer.send('app:save-settings', json),
+  // Свежие настройки из файла: снимок из аргументов запуска (выше) устаревает
+  // после перезагрузки страницы — она перечитывает файл (invoke).
+  getSettings: () => ipcRenderer.invoke('app:get-settings'),
   // beat — пульс: страница говорит «кадр нарисован». Это НЕ таймер страницы, а
   // сам кадр (см. web/js/main.js: тикер PixiJS), поэтому молчание пульса
   // означает ровно одно: картинки больше нет. Оболочка по нему возвращает

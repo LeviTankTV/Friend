@@ -356,6 +356,16 @@ fn save_settings(shell: State<Shell>, json: String) {
 }
 
 #[tauri::command]
+fn get_settings(shell: State<Shell>) -> Option<String> {
+    // Свежие настройки из файла: init-скрипт отдаёт снимок на момент создания
+    // окна, после перезагрузки страницы он устаревает (та же история, что у
+    // аргументов preload в Electron-оболочке).
+    std::fs::read_to_string(&shell.settings_path)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+#[tauri::command]
 fn replay_focus(app: AppHandle, shell: State<Shell>) {
     // Страница переподключилась: она просит последнюю строку помощника заново
     // (аналог send('focus:info', lastFocusData) при загрузке у Электрона).
@@ -363,6 +373,14 @@ fn replay_focus(app: AppHandle, shell: State<Shell>) {
         if let Some(data) = guard.as_ref() {
             let _ = app.emit("focus:info", data);
         }
+    }
+}
+
+/// Показать/спрятать окно (трей: пункт меню и двойной клик).
+fn toggle_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let visible = w.is_visible().unwrap_or(false);
+        let _ = if visible { w.hide() } else { w.show() };
     }
 }
 
@@ -381,8 +399,17 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             move_by, set_position, get_position, set_bounds, set_size, always_on_top,
-            work_area, focus, quit, beat, autostart, dance, save_settings, replay_focus,
+            work_area, focus, quit, beat, autostart, dance, save_settings, get_settings,
+            replay_focus,
         ])
+        .on_window_event(|window, event| {
+            // Закрытие окна — прячем в трей: персонаж живёт в системе, как у
+            // Electron-оболочки. Настоящий выход — пункт меню трея.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let (bin_dir, web_dir) = resolve_dirs(&handle);
@@ -450,6 +477,30 @@ fn main() {
                 .initialization_script(&init_script)
                 .build()?;
             let _ = win.set_focus();
+
+            // Трей: «показать / скрыть» и «выход», двойной клик — показать.
+            // Иконка пока статичная (спрайт-лицо); живая иконка из capturePage —
+            // шаг 5+ аудита (в Tauri нужен COM CapturePreview).
+            let show_i = tauri::menu::MenuItem::with_id(app, "show", "показать / скрыть", true, None::<&str>)?;
+            let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "выход", true, None::<&str>)?;
+            let tray_menu = tauri::menu::Menu::with_items(app, &[&show_i, &quit_i])?;
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+            let _tray = tauri::tray::TrayIconBuilder::with_id("main")
+                .icon(icon)
+                .tooltip("Мира — двойной клик: показать")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, ev| match ev.id().as_ref() {
+                    "show" => toggle_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, ev| {
+                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = ev {
+                        toggle_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
 
             // Помощник активного окна: строки — события focus:info странице.
             {

@@ -23,6 +23,7 @@ window.FriendBridge = (function () {
     // браузерный dev-режим, где оболочки нет вовсе.
     settings: null,
     saveSettings: () => {},
+    getShellSettings: async () => null,
     // Автозапуск: в браузере запустить себя при входе в систему нечем.
     setAutostart: async () => false,
     // В браузере источника системного микшера нет и быть не может — танец
@@ -123,6 +124,12 @@ window.FriendBridge = (function () {
     // localStorage для этого не годится: start.bat гасит прошлое окно силой, и
     // браузерное хранилище не успевает сброситься на диск (см. desktop/main.js).
     api.settings = window.friendNative.settings || null;
+    // Свежие настройки из файла: снимок выше устаревает после перезагрузки
+    // страницы — она перечитывает файл (invoke).
+    api.getShellSettings = async () => {
+      const s = await window.friendNative.getSettings();
+      return s && typeof s === 'object' ? s : null;
+    };
     api.saveSettings = (settings) => {
       if (window.friendNative.saveSettings) window.friendNative.saveSettings(settings);
     };
@@ -201,6 +208,13 @@ window.FriendBridge = (function () {
     // каждом кадре — команда копеечная, но сторож обязан видеть жизнь.
     api.beat = () => { inv('beat'); };
     api.settings = window.__FRIEND_SETTINGS__ || null;
+    // Свежие настройки из файла: снимок из init-скрипта — на момент СОЗДАНИЯ
+    // окна, после перезагрузки страницы он тоже устаревает.
+    api.getShellSettings = async () => {
+      const j = await inv('get_settings');
+      if (!j || typeof j !== 'string') return null;
+      try { return JSON.parse(j); } catch (_err) { return null; }
+    };
     api.saveSettings = (settings) => { inv('save_settings', { json: JSON.stringify(settings) }); };
 
     // Место окна может НЕ совпасть с тем, куда его просили: оболочка держит

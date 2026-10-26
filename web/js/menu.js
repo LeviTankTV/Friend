@@ -418,6 +418,21 @@ window.FriendMenu = (function () {
         persist();
         sync();
       },
+      // setShellSettings — оболочка прислала СВЕЖИЕ настройки из файла (страница
+      // перезагрузилась, снимок при её создании устарел). Применяем разницу:
+      // каждое изменившееся поле проходит через onChange — эффекты (размер окна,
+      // посадка, «поверх всех») знает только js/main.js.
+      setShellSettings: function (obj) {
+        const prev = Object.assign({}, settings);
+        settings = pick(obj);
+        persist();
+        sync();
+        for (const k of Object.keys(DEFAULTS)) {
+          if (JSON.stringify(prev[k]) !== JSON.stringify(settings[k]) && o.onChange) {
+            o.onChange(k, settings[k]);
+          }
+        }
+      },
       panel: panel,
     };
   }
