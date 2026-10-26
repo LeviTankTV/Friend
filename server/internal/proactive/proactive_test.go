@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"friend/internal/focus"
+	"friend/internal/patterns"
 )
 
 func cfg() Config {
@@ -414,7 +415,7 @@ func TestPatternFiresOncePerDay(t *testing.T) {
 	now := time.Date(2026, 10, 25, 14, 0, 0, 0, time.Local)
 	s.SetStarted(now.Add(-time.Minute)) // иначе про воду сработает раньше паттерна
 	in := Inputs{Now: now, LateNights: 4}
-	in.LastInput = now // рядом
+	in.LastInput = now                                     // рядом
 	_, _ = s.Tick(Inputs{Now: now.Add(-30 * time.Second)}) // посев части суток
 
 	ev, ok := s.Tick(in)
@@ -523,5 +524,83 @@ func TestFollowupOncePerDay(t *testing.T) {
 	busy.Focus = focus.Snapshot{Process: "goland64.exe", Kind: focus.KindCode, Label: "GoLand", Since: day(11, 0)}
 	if _, ok := s2.Tick(busy); ok {
 		t.Fatal("занятому в редакторе факты не подсовывают")
+	}
+}
+
+// Недельный ритм (этап 6): внутри блока того дня недели — тёплое наблюдение,
+// раз в неделю (RhythmGap); вне блока или дня — молчание. FoodReminder
+// сдвинут за горизонт теста, чтобы «пора пить» не перебивал ритм.
+func TestWeekRhythmFiresInBlock(t *testing.T) {
+	s := New(Config{Enabled: true, MinGap: 0, FoodReminder: 1000 * time.Hour, QuietFromHour: 23, QuietToHour: 7})
+	// Суббота 21:30 — блок 20:00–24:00, тишина ещё не наступила.
+	now := time.Date(2026, 10, 24, 21, 30, 0, 0, time.Local) // суббота
+	s.SetStarted(now.Add(-time.Minute))
+	r := &patterns.Rhythm{Weekday: time.Saturday, Hour: 20, Weeks: 4, Count: 8}
+	// Посев части суток: без него вечер «начался» бы на главном тике.
+	if ev0, ok0 := s.Tick(Inputs{Now: now.Add(-30 * time.Second), LastInput: now}); ok0 {
+		s.MarkSent(ev0.Kind, now.Add(-30*time.Second))
+	}
+
+	in := Inputs{Now: now, LastInput: now, Rhythm: r}
+	ev, ok := s.Tick(in)
+	if !ok || ev.Kind != KindRhythm {
+		t.Fatalf("внутри блока — тёплое наблюдение: %+v ok=%v", ev, ok)
+	}
+	if !strings.Contains(ev.Reason, "субботы") || !strings.Contains(ev.Reason, "20:00") {
+		t.Fatalf("в поводе должны быть день и блок: %q", ev.Reason)
+	}
+	s.MarkSent(KindRhythm, now)
+	// Тот же блок через 2 часа (23:30, уже окно тишины — allowQuiet) — но
+	// раз в неделю: молчит. Посев части суток обязателен: переход
+	// вечер→ночь иначе разбудил бы ночной ритуал раньше ритма.
+	later := now.Add(2 * time.Hour)
+	if ev1, ok1 := s.Tick(Inputs{Now: later.Add(-30 * time.Second), LastInput: later}); ok1 {
+		s.MarkSent(ev1.Kind, later.Add(-30*time.Second))
+	}
+	if ev2, ok2 := s.Tick(Inputs{Now: later, LastInput: later, Rhythm: r}); ok2 {
+		t.Fatalf("раз в неделю, а не дважды: %+v", ev2)
+	}
+	// Через неделю в том же блоке — снова можно. Первый тик недели съедает
+	// переход части суток (на прошлой неделе была ночь) — «вечер» помечаем,
+	// ритм выходит следующим тиком.
+	again := now.Add(7 * 24 * time.Hour).Add(30 * time.Minute) // суббота 22:00
+	if ev2, ok2 := s.Tick(Inputs{Now: again, LastInput: again, Rhythm: r}); ok2 {
+		s.MarkSent(ev2.Kind, again)
+	}
+	// +26 минут: анти-спам-зазор (минимум 25) занял «silence» с первого тика
+	// недели; 26 минут всё ещё внутри блока 20:00–24:00. Он рядом (LastInput
+	// свежий: PresenceMax — 20 минут) и недавно говорил (LastSay: иначе
+	// «silence», стоящий раньше ритма, заберёт повод).
+	in3 := Inputs{Now: again.Add(26 * time.Minute), LastInput: again.Add(26 * time.Minute),
+		LastSay: again.Add(21 * time.Minute), Rhythm: r}
+	if ev3, ok3 := s.Tick(in3); !ok3 || ev3.Kind != KindRhythm {
+		t.Fatalf("через неделю в блоке — снова можно: %+v ok=%v", ev3, ok3)
+	}
+}
+
+func TestWeekRhythmOnlyInBlock(t *testing.T) {
+	s := New(Config{Enabled: true, MinGap: 0, FoodReminder: 1000 * time.Hour, QuietFromHour: 23, QuietToHour: 7})
+	r := &patterns.Rhythm{Weekday: time.Saturday, Hour: 20, Weeks: 4, Count: 8}
+	// Воскресенье, тот же час: посев части суток, затем проверка.
+	sun := time.Date(2026, 10, 25, 21, 0, 0, 0, time.Local)
+	s.SetStarted(sun.Add(-time.Minute))
+	if evS, okS := s.Tick(Inputs{Now: sun.Add(-30 * time.Second), LastInput: sun}); okS {
+		s.MarkSent(evS.Kind, sun.Add(-30*time.Second))
+	}
+	if _, ok := s.Tick(Inputs{Now: sun, LastInput: sun, Rhythm: r}); ok {
+		t.Fatal("не тот день недели")
+	}
+	// Суббота, но блок чужой (14:00 при ритме 20:00). Часть суток снова
+	// сменилась (вечер → день) — сначала съедаем переход посевом.
+	sat := time.Date(2026, 10, 31, 14, 0, 0, 0, time.Local)
+	if evA, okA := s.Tick(Inputs{Now: sat.Add(-30 * time.Second), LastInput: sat}); okA {
+		s.MarkSent(evA.Kind, sat.Add(-30*time.Second))
+	}
+	if _, ok := s.Tick(Inputs{Now: sat, LastInput: sat, Rhythm: r}); ok {
+		t.Fatal("не тот блок")
+	}
+	// Ритма нет (архив не нарисовал) — тоже молчание.
+	if _, ok := s.Tick(Inputs{Now: sat, LastInput: sat}); ok {
+		t.Fatal("нет ритма — нет повода")
 	}
 }

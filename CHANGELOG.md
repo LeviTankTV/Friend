@@ -13,6 +13,12 @@ The dev diary with measurements lives in [PLAN.md](PLAN.md).
   reloads the character file for the new language, swaps prompt dictionaries,
   voice, wake matcher and STT language, and broadcasts `lang` to every window;
   the choice persists in settings and re-applies on the next start.
+- **Weekly rhythm (proactive).** A new pattern reads four weeks of the local
+  conversation archive and finds a persistent weekday + 4-hour block («his
+  Saturdays usually look like this»). When the block comes around, she says
+  ONE warm «I'm here, I notice» line — at most once a week, quiet hours
+  don't mute it, anti-spam gap still applies. Facts only, no guessing: the
+  same discipline as the sleep-deprivation pattern.
 - Self-test grew to 31 parts: memory (seed a fact via `запомни:`, delete it
   through the panel, verify it left memory) and language (en → ru round-trip
   checked on the page, in the menu buttons and in `/healthz`).

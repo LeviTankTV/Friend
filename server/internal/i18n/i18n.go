@@ -93,6 +93,10 @@ type Dict struct {
 	PLateNights   string // промпт: %s «3 ночи»
 	PatternReason string // повод: %s
 
+	// Недельный ритм (этап 6, patterns): день недели — во множественном
+	// числе (WeekdayPlural), блок — два часа формата %02d:00.
+	PWeekRhythm string // повод: %s день недели, %02d:00–%02d:00
+
 	// Забота и инициатива (этап 11б). Счёта — готовые фразы, как выше.
 	ReturnReason   string // %s «5 ч» отсутствия
 	FollowupReason string // %s «30 дней назад»-возраст, %s факт
@@ -258,6 +262,10 @@ var RU = Dict{
 	PatternReason: "Он недосыпает: %s за полночь за последнюю неделю. ОДНА мягкая реплика " +
 		"про НЕГО — тебе заметно, что он устал, но без лекции и без планов «лечь пораньше».",
 
+	PWeekRhythm: "Замечен ритм его недели: %s обычно проходят в это время (%02d:00–%02d:00). " +
+		"ОДНО тёплое наблюдение «я рядом, я это вижу», не чаще раза в неделю и без " +
+		"оценок — это его ритм, а не проблема.",
+
 	ReturnReason: "Он вернулся — его не было %s. Встреть его ОДНОЙ тёплой репликой лично: " +
 		"рада, что он снова здесь, без допроса «где ты был».",
 	FollowupReason: "%s он рассказал тебе: «%s». Вернись к этому ОДНОЙ короткой репликой " +
@@ -387,6 +395,10 @@ var EN = Dict{
 	PatternReason: "He is running short on sleep: %s past midnight this week. ONE soft line " +
 		"ABOUT HIM — you can see he is tired, but no lecturing and no \"go to bed early\" plans.",
 
+	PWeekRhythm: "A weekly rhythm has emerged: his %s usually happen around this time " +
+		"(%02d:00–%02d:00). ONE warm \"I'm here, I notice\" line, at most once a week, " +
+		"and no judgment — it is his rhythm, not a problem.",
+
 	ReturnReason: "He is back — he was gone for %s. Greet him with ONE warm personal line: " +
 		"you are glad he is here again, no interrogation about \"where were you\".",
 	FollowupReason: "%s he told you: \"%s\". Come back to it with ONE short human line: " +
@@ -412,6 +424,17 @@ func CountNights(lang string, n int) string {
 		return fmt.Sprintf("%d %s", n, enPlural(n, "night", "nights"))
 	}
 	return fmt.Sprintf("%d %s", n, ruPlural(n, "ночь", "ночи", "ночей"))
+}
+
+// WeekdayPlural — день недели во множественном числе («субботы» / "Saturdays",
+// воскресенье = 0): ритм недели говорит о его обычных днях, не об одном.
+func WeekdayPlural(lang string, wd time.Weekday) string {
+	ru := []string{"воскресенья", "понедельники", "вторники", "среды", "четверги", "пятницы", "субботы"}
+	en := []string{"Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"}
+	if For(lang) == &EN {
+		return en[int(wd)%7]
+	}
+	return ru[int(wd)%7]
 }
 
 // CountDays — «2 дня» / "2 days".

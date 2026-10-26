@@ -69,6 +69,10 @@ const (
 	// KindFollowup — возврат к старому факту (этап 11б): «месяц назад ты
 	// говорил про… — как там?».
 	KindFollowup Kind = "followup"
+	// KindRhythm — недельный ритм (этап 6, patterns): его субботы обычно
+	// проходят в этом блоке. Одно тёплое наблюдение в начале блока, раз в
+	// неделю — не повод-напоминание, а «я рядом, я это вижу».
+	KindRhythm Kind = "rhythm"
 )
 
 // Пороги триггеров. Всё, что стоит за числом с объяснением.
@@ -118,6 +122,9 @@ type Inputs struct {
 	// LateNights — сколько ночей за полночь он говорил с ней за последнюю
 	// неделю (этап 11а, internal/patterns). 0 — данных нет / недосыпа нет.
 	LateNights int
+	// Rhythm — недельный ритм его разговоров (этап 6, internal/patterns).
+	// Nil — ритма нет: архив короче четырёх недель или разговоры разбросаны.
+	Rhythm *patterns.Rhythm
 	// FollowupFact — старый факт из памяти для возврата к нему (этап 11б).
 	// Пусто — старых фактов нет; возраст отдельно (FollowupDays).
 	FollowupFact string
@@ -150,6 +157,7 @@ type Scheduler struct {
 	lastCare      time.Time // ночная бережность про редактор уже была за эту ночь?
 	lastPattern   time.Time // про накопленный недосып сегодня уже говорили (этап 11а)
 	lastFollowup  time.Time // к старому факту сегодня уже возвращались (11б)
+	lastRhythm    time.Time // ритм недели уже отмечали на этой неделе (этап 6)
 	// Встреча после отсутствия (11б): помним, был ли он рядом на прошлом
 	// тике и когда видели его живым в последний раз.
 	prevPresent    bool
@@ -268,6 +276,7 @@ func (s *Scheduler) Tick(in Inputs) (Event, bool) {
 		{KindSilence, s.silence, rule{}},
 		{KindPattern, s.pattern, rule{}},
 		{KindFollowup, s.followup, rule{}},
+		{KindRhythm, s.weekRhythm, rule{allowQuiet: true}},
 	}
 
 	for _, c := range cands {
@@ -528,6 +537,33 @@ func sameDay(a, b time.Time) bool {
 	return ay == by && am == bm && ad == bd
 }
 
+// weekRhythm — недельный ритм (этап 6, patterns): его субботы обычно
+// проходят в этом блоке. Реплика выходит ВНУТРИ блока того самого дня
+// недели и не чаще раза в неделю (RhythmGap). Окно тишины не глушит
+// (allowQuiet): это тёплое «я рядом, я это вижу», а не понукание — но
+// анти-спам-зазор между инициативами остаётся. С «иди спать» не
+// конкурирует: та про эту ночь, этот про ритм целого месяца.
+func (s *Scheduler) weekRhythm(in Inputs) (Event, bool) {
+	if in.Rhythm == nil {
+		return Event{}, false
+	}
+	r := in.Rhythm
+	if int(in.Now.Weekday()) != int(r.Weekday) {
+		return Event{}, false
+	}
+	if in.Now.Hour() < r.Hour || in.Now.Hour() >= r.Hour+int(patterns.RhythmBlock/time.Hour) {
+		return Event{}, false
+	}
+	if !s.lastRhythm.IsZero() && in.Now.Sub(s.lastRhythm) < patterns.RhythmGap {
+		return Event{}, false // про ритм уже говорили на этой неделе
+	}
+	if !present(in) {
+		return Event{}, false
+	}
+	return Event{Kind: KindRhythm, Reason: fmt.Sprintf(d(in).PWeekRhythm,
+		i18n.WeekdayPlural(in.Language, r.Weekday), r.Hour, (r.Hour+4)%24)}, true
+}
+
 // trackPresence — слежение за присутствием (этап 11б): вызывается КАЖДЫЙ
 // тик до проверки кандидатов (триггер может не дойти до «встречи», а факт
 // «ушёл-вернулся» обязан быть замечен). Сервер, запущенный во время
@@ -621,6 +657,8 @@ func (s *Scheduler) MarkSent(kind Kind, now time.Time) {
 		s.lastPattern = now
 	case KindFollowup:
 		s.lastFollowup = now
+	case KindRhythm:
+		s.lastRhythm = now
 	case KindMorning, KindEvening:
 		s.lastDayPart = persona.PartOf(now)
 	}

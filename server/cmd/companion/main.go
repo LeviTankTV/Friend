@@ -387,6 +387,24 @@ func lateNightsNow(mem *memory.Store) (int, bool) {
 	return patterns.LateNights(ats, time.Now()), true
 }
 
+// weekRhythmNow — самый устойчивый «день недели + блок» его разговоров за
+// 4 недели (этап 6, patterns.WeeklyRhythm). ok=false — ритма нет: архив
+// короче окна или разговоры разбросаны, и это честно.
+func weekRhythmNow(mem *memory.Store, now time.Time) (patterns.Rhythm, bool) {
+	if mem == nil {
+		return patterns.Rhythm{}, false
+	}
+	msgs, err := mem.ConvoSince(now.Add(-patterns.RhythmWindow))
+	if err != nil {
+		return patterns.Rhythm{}, false
+	}
+	ats := make([]time.Time, 0, len(msgs))
+	for _, m := range msgs {
+		ats = append(ats, m.At)
+	}
+	return patterns.WeeklyRhythm(ats, now)
+}
+
 func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Scheduler,
 	comp *companion.Companion, hub *server.Hub, sess *chat.Session, tracker *focus.Tracker,
 	mem *memory.Store, store *state.Store, moodEvents <-chan mood.Event,
@@ -467,6 +485,12 @@ func proactiveLoop(ctx context.Context, log *slog.Logger, sched *proactive.Sched
 		in := proactive.Inputs{Now: now, Language: lang()}
 		if n, ok := lateNightsNow(mem); ok {
 			in.LateNights = n
+		}
+		// Недельный ритм (этап 6): устойчивый «день недели + блок» его
+		// разговоров за 4 недели. Архив читается на каждом тике — тот же
+		// порядок тяжести, что и у недосыпа.
+		if r, ok := weekRhythmNow(mem, now); ok {
+			in.Rhythm = &r
 		}
 		// Возврат к старому факту (этап 11б): подбор — тяжёлее тика, поэтому
 		// один раз на день, а не на каждый тик (meta-ключ в памяти хранит
