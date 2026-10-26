@@ -140,7 +140,6 @@ Run the full self-check any time: `cd desktop && npx electron . --selftest`
 
 - More languages (the i18n core is done — ru/en now)
 - Character gallery / sharing personalities
-- More proactive care patterns (weekly rhythms, follow-ups on old facts)
 
 Contributions welcome — pick something from PLAN.md, the discipline there
 is: measurements over vibes.

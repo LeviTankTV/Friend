@@ -61,4 +61,3 @@ First public release. Mira is complete across all planned stages:
 - More languages (i18n core is ready; languages beyond ru/en need a
   dictionary registry)
 - Character gallery / sharing personalities
-- More proactive care patterns (weekly rhythms, follow-ups on old facts)
