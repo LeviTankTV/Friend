@@ -33,7 +33,8 @@ can work locally, works locally.
   assistant-speak.
 - **Remembers.** `remember: my cat's name is Barsik` — facts go to a local
   SQLite memory with full-text search; every night she compresses the day
-  into a note about you. Survives restarts.
+  into a note about you. Survives restarts. And you can always look through
+  and delete any fact: right-click her → *what she knows*.
 - **Feels.** Mood, energy and affection drift on their own: ignore her for
   four hours and you'll hear it in her tone. She reads the *tone* of your
   messages locally (tired? upset? glad?) and responds with empathy — she
