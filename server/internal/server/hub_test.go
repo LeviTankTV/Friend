@@ -201,3 +201,21 @@ func TestPingPong(t *testing.T) {
 		t.Fatalf("ответ на ping = %v, want %s", msg["type"], TypePong)
 	}
 }
+
+// Origin ассет-протокола Tauri на Windows (http://tauri.localhost) — свой
+// (этап 15): страница из ассетов оболочки ходит на тот же сервер.
+func TestLocalOriginTauriAsset(t *testing.T) {
+	cases := map[string]bool{
+		"http://tauri.localhost":      true,
+		"https://tauri.localhost":     true,
+		"tauri://localhost":           true,
+		"http://127.0.0.1:8787":       true,
+		"http://evil.example.com":     false,
+		"http://tauri.localhost.evil": false,
+	}
+	for origin, want := range cases {
+		if got := isLocalOrigin(origin); got != want {
+			t.Fatalf("isLocalOrigin(%q) = %v, ожидал %v", origin, got, want)
+		}
+	}
+}

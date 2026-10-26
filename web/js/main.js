@@ -361,7 +361,7 @@
       del.title = friendLang.L('memory.deleteAria');
       del.setAttribute('aria-label', friendLang.L('memory.deleteAria'));
       del.addEventListener('click', () => {
-        fetch('/memory/' + f.id, { method: 'DELETE' })
+        fetch(window.FriendServerURL('/memory/' + f.id), { method: 'DELETE' })
           .then((resp) => {
             if (resp.ok || resp.status === 404) {
               // 404 — факта уже нет (например, стёрт в другой сессии).
@@ -386,7 +386,7 @@
 
     function load() {
       hint.textContent = friendLang.L('memory.hint');
-      return fetch('/memory?limit=' + LIMIT)
+      return fetch(window.FriendServerURL('/memory?limit=' + LIMIT))
         .then((resp) => {
           if (!resp.ok) return resp.text().then((t) => { throw new Error(t.trim() || String(resp.status)); });
           return resp.json();
@@ -406,7 +406,7 @@
     }
 
     more.addEventListener('click', () => {
-      fetch('/memory?limit=' + LIMIT + '&offset=' + shown)
+      fetch(window.FriendServerURL('/memory?limit=' + LIMIT + '&offset=' + shown))
         .then((resp) => {
           if (!resp.ok) return resp.text().then((t) => { throw new Error(t.trim() || String(resp.status)); });
           return resp.json();
@@ -872,8 +872,8 @@
 
   function speakOne(t, int) {
     return new Promise((resolve) => {
-      const a = new Audio('/tts?text=' + encodeURIComponent(t) +
-        '&rate=' + int.rate + '&pitch=' + int.pitch);
+      const a = new Audio(window.FriendServerURL('/tts?text=' + encodeURIComponent(t) +
+        '&rate=' + int.rate + '&pitch=' + int.pitch));
       a.addEventListener('playing', () => { ttsPlaying++; idleTouch(); });
       const off = (ev) => {
         if (ev.type === 'ended' || ev.type === 'error') {
@@ -975,7 +975,7 @@
   // Ошибку бросает наружу: решение «что показать человеку» у того, кто зовёт.
   async function transcribe(blob) {
     const wav = await encodeWav16k(blob);
-    const resp = await fetch('/stt', { method: 'POST', body: wav });
+    const resp = await fetch(window.FriendServerURL('/stt'), { method: 'POST', body: wav });
     if (!resp.ok) {
       const why = await resp.text().catch(() => '');
       throw new Error('сервер не расшифровал (статус ' + resp.status + (why ? ': ' + why.trim() : '') + ')');
@@ -1098,7 +1098,7 @@
     for (const f of seg) { out.set(f, o); o += f.length; }
     wakeBusy = true;
     try {
-      await fetch('/wake', { method: 'POST', body: wavFromFloat(out) });
+      await fetch(window.FriendServerURL('/wake'), { method: 'POST', body: wavFromFloat(out) });
       // Ответ не разбираем: реакция (wake) приходит кадром WakeMsg по WS —
       // так же, как все её реплики.
     } catch (e) {
@@ -1673,7 +1673,7 @@
     wakeStart: () => startWakeLoop(),
     wakeStop: () => stopWakeLoop(),
     wakeSend: (blob) => encodeWav16k(blob).then(
-      (wav) => fetch('/wake', { method: 'POST', body: wav }).then((r) => r.json()),
+      (wav) => fetch(window.FriendServerURL('/wake'), { method: 'POST', body: wav }).then((r) => r.json()),
     ),
     wakePhrases: () => WAKE_PHRASES().slice(),
     wakeEvents: () => wakeEvents,

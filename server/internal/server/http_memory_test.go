@@ -235,3 +235,36 @@ func TestHealthzCarriesLanguage(t *testing.T) {
 		t.Fatalf("language=%q, ожидал en", out2.Language)
 	}
 }
+
+// CORS (этап 15, оболочка Tauri): страница живёт в ассет-протоколе
+// tauri://localhost и ходит на сервер чужим origin. Preflight OPTIONS
+// обязан отвечать 204 с разрешениями; фактический запрос — с ACAO.
+func TestCorsForTauriPage(t *testing.T) {
+	ts, _, _ := newMemoryHTTP(t)
+
+	req, _ := http.NewRequest(http.MethodOptions, ts.URL+"/memory", nil)
+	req.Header.Set("Origin", "http://tauri.localhost")
+	req.Header.Set("Access-Control-Request-Method", "DELETE")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("OPTIONS: код %d, ожидал 204", resp.StatusCode)
+	}
+	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("preflight без ACAO: %q", resp.Header.Get("Access-Control-Allow-Origin"))
+	}
+
+	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/memory", nil)
+	req2.Header.Set("Origin", "http://tauri.localhost")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("GET без ACAO: %q", resp2.Header.Get("Access-Control-Allow-Origin"))
+	}
+}

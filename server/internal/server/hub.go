@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -337,13 +338,25 @@ var upgrader = websocket.Upgrader{
 }
 
 func isLocalOrigin(origin string) bool {
-	for _, p := range []string{
-		"http://127.0.0.1", "http://localhost", "https://127.0.0.1", "https://localhost",
-		"tauri://localhost", "app://localhost", // Tauri
-	} {
-		if len(origin) >= len(p) && origin[:len(p)] == p {
-			return true
-		}
+	// Разбираем честно, а не по префиксу: префикс «http://localhost»
+	// пропустил бы и «http://localhost.evil» (нашёл тест на этапе 15).
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "tauri", "app":
+		// Ассет-протокол Tauri (macOS/Linux): tauri://localhost.
+		return host == "localhost"
+	case "http", "https":
+		// tauri.localhost — ассет-протокол Tauri на Windows; суффикс
+		// .localhost зарезервирован стандартом и резолвится в loopback.
+		return host == "127.0.0.1" || host == "localhost" ||
+			strings.HasSuffix(host, ".localhost")
 	}
 	return false
 }
@@ -352,7 +365,10 @@ func isLocalOrigin(origin string) bool {
 func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		h.log.Warn("апгрейд WebSocket не удался", "err", err, "remote", r.RemoteAddr)
+		// Origin в логе: ассет-протокол оболочки (Tauri) — легитимный клиент,
+		// и его отсутствие в isLocalOrigin видно только здесь.
+		h.log.Warn("апгрейд WebSocket не удался", "err", err, "remote", r.RemoteAddr,
+			"origin", r.Header.Get("Origin"))
 		return
 	}
 	c := &wsClient{

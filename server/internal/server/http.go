@@ -279,9 +279,27 @@ func New(opts Options) (*http.Server, error) {
 
 	return &http.Server{
 		Addr:              opts.Addr,
-		Handler:           logRequests(opts.Log, mux),
+		Handler:           cors(logRequests(opts.Log, mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}, nil
+}
+
+// cors — ответы с разрешением чужого origin. Нужен оболочке Tauri: она отдаёт
+// страницу из tauri://localhost, и браузер требует CORS на /stt /memory /wake.
+// "*" здесь безопасен: сервер слушает только 127.0.0.1, наружу не светится,
+// и данных «чужих» у него нет — всё предназначено этой же машине.
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "600")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // saveWavBody — тело запроса-записи во временный wav. Отдатывает фильтры

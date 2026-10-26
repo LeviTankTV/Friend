@@ -1264,7 +1264,7 @@ window.FriendAvatar = (function () {
     // закрытые глаза), поэтому лист из трёх картинок — тоже работающий лист.
     let sheet = null;
     const sheetSprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
-    const sheetUrl = (opts && opts.sheetUrl) || '/sprites/sheet.json';
+    const sheetUrl = (opts && opts.sheetUrl) || (window.FriendServerURL ? window.FriendServerURL('/sprites/sheet.json') : '/sprites/sheet.json');
 
     function loadSheetTexture(url) {
       return new Promise((resolve) => {

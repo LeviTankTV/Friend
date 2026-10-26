@@ -38,6 +38,15 @@ window.FriendBridge = (function () {
     onFocus: () => {},
   };
 
+  // serverBase — откуда доступен сервер: пусто, когда страница им же и
+  // отдана (Electron, браузер); http://127.0.0.1:8787, когда оболочка
+  // (Tauri) отдаёт страницу из своего ассет-протокола (адрес вписывает
+  // initialization script — window.__FRIEND_SERVER__). Пустая строка — это
+  // «тот же origin»: net.js по ней понимает, что адрес собирать не надо.
+  api.serverBase = window.__FRIEND_SERVER__ || '';
+  window.FRIEND_SERVER_BASE = api.serverBase;
+  window.FriendServerURL = function (path) { return api.serverBase + path; };
+
   // Точка отсчёта dev-режима: то место, куда оболочка поставила бы окно на
   // первом запуске (правый нижний угол). Всё, что дальше, — настоящее смещение
   // в экранных пикселях, поэтому протокол и арифметика перетаскивания в
@@ -159,36 +168,74 @@ window.FriendBridge = (function () {
     return api;
   }
 
-  // --- Tauri: window.__TAURI__ появляется из @tauri-apps/api ---
+  // --- Tauri: window.__TAURI__ появляется из @tauri-apps/api (withGlobalTauri) ---
+  //
+  // Полный паритет с веткой Electron (этап 15): те же команды и события, что
+  // в desktop-tauri/src-tauri/src/main.rs. Настройки оболочка вписывает в
+  // страницу до её скриптов (window.__FRIEND_SETTINGS__, initialization
+  // script) — их читать синхронно при сборке меню, как у Электрона.
   if (window.__TAURI__) {
     api.mode = 'tauri';
     api.isNative = true;
     const t = window.__TAURI__;
-    const appWindow = t.window && t.window.getCurrent ? t.window.getCurrent() : null;
+    const inv = (cmd, args) => t.core.invoke(cmd, args);
+    const listen = (event, fn) => t.event.listen(event, fn);
+
     api.home = homePoint;
-    api.setSize = async (w, h) => { if (appWindow) await appWindow.setSize(new t.window.LogicalSize(w, h)); };
+    api.setSize = async (w, h) => { await inv('set_size', { width: Math.round(w), height: Math.round(h) }); };
+    api.setAlwaysOnTop = async (v) => { await inv('always_on_top', { on: !!v }); };
+    // focus нужен разговору: окно висит поверх всех и часто не в фокусе.
+    api.focus = async () => { await inv('focus'); };
+    api.quit = async () => { await inv('quit'); };
+    api.setAutostart = async (on) => !!(await inv('autostart', { on: !!on }));
+    api.setDanceCapture = async (on) => !!(await inv('dance', { on: !!on }));
+    api.onSound = (cb) => { listen('sound:level', (e) => cb(e.payload)); };
+    api.onFocus = (fn) => {
+      listen('focus:info', (e) => fn(e.payload));
+      // Страница переподключилась: просим последнюю строку помощника заново
+      // (у Электрона оболочка сама повторяет lastFocusData при загрузке).
+      inv('replay_focus');
+    };
+    api.workArea = async () => await inv('work_area');
+    // Пульс кадров для сторожа оболочки (BEAT_TIMEOUT): страница зовёт на
+    // каждом кадре — команда копеечная, но сторож обязан видеть жизнь.
+    api.beat = () => { inv('beat'); };
+    api.settings = window.__FRIEND_SETTINGS__ || null;
+    api.saveSettings = (settings) => { inv('save_settings', { json: JSON.stringify(settings) }); };
+
+    // Место окна может НЕ совпасть с тем, куда его просили: оболочка держит
+    // окно в видимой части экрана. Настоящее место уходит серверу — тот же
+    // контракт report(), что в ветке Electron выше.
+    let known = null;
+    function report(asked, real) {
+      if (!real) return real;
+      if (asked && (Math.abs(asked.x - real.x) > 1 || Math.abs(asked.y - real.y) > 1)) {
+        if (api.onPositionCorrected) api.onPositionCorrected(real);
+      }
+      known = { x: real.x, y: real.y };
+      return real;
+    }
+
     api.getPosition = async () => {
-      if (!appWindow) return { x: 0, y: 0 };
-      const p = await appWindow.outerPosition();
-      const s = await appWindow.scaleFactor();
-      return { x: Math.round(p.x / s), y: Math.round(p.y / s) };
+      const p = await inv('get_position');
+      known = { x: p.x, y: p.y };
+      return p;
     };
-    api.setPosition = async (x, y) => {
-      if (!appWindow) return { x, y };
-      await appWindow.setPosition(new t.window.LogicalPosition(x, y));
-      return { x, y };
-    };
+    api.setPosition = async (x, y) => report(
+      { x: Math.round(x), y: Math.round(y) },
+      await inv('set_position', { x: Math.round(x), y: Math.round(y) }),
+    );
     api.moveBy = async (dx, dy) => {
-      const p = await api.getPosition();
-      return await api.setPosition(Math.round(p.x + dx), Math.round(p.y + dy));
+      const asked = known ? { x: Math.round(known.x + dx), y: Math.round(known.y + dy) } : null;
+      return report(asked, await inv('move_by', { dx: Math.round(dx), dy: Math.round(dy) }));
     };
     api.setBounds = async (b) => {
-      await api.setSize(b.width, b.height);
-      return await api.setPosition(b.x, b.y);
+      if (b && b.width && b.height) api.size = { width: Math.round(b.width), height: Math.round(b.height) };
+      return report(
+        b && typeof b.x === 'number' ? { x: Math.round(b.x), y: Math.round(b.y) } : null,
+        await inv('set_bounds', { b: { x: b.x, y: b.y, width: b.width, height: b.height } }),
+      );
     };
-    api.setAlwaysOnTop = async (v) => { if (appWindow) await appWindow.setAlwaysOnTop(v); };
-    api.focus = async () => { if (appWindow) await appWindow.setFocus(); };
-    api.quit = async () => { if (window.__TAURI__ && t.process) t.process.exit(0); };
     return api;
   }
 

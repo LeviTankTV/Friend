@@ -45,6 +45,15 @@ window.FriendNet = (function () {
   }
 
   function wsURL() {
+    // Страница может быть отдана не сервером (оболочка Tauri): тогда адрес
+    // сервера знает мост (FRIEND_SERVER_BASE — непустая строка), а не
+    // location. Пустая строка = «тот же origin» — иначе new URL('/ws')
+    // кидает и страница остаётся без связи (находка самопроверки).
+    const base = window.FRIEND_SERVER_BASE || '';
+    if (base) {
+      const u = new URL(base);
+      return (u.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + u.host + '/ws';
+    }
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Порт тот же, с которого отдана страница: сервер компаньона отдаёт и
     // фронтенд, и /ws, поэтому «где страница — там и канал».
