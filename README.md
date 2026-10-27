@@ -136,10 +136,23 @@ desktop/  Electron shell: transparent window, tray, helpers, selftest
 Run the full self-check any time: `cd desktop && npx electron . --selftest`
 (31 checks, exit 0 on a healthy machine).
 
+## How it was built
+
+Developed with an AI assistant under human direction. Every design
+decision, measurement and dead end is written down in [PLAN.md](PLAN.md)
+(in Russian) — a dev diary where the discipline is *measurements over
+vibes*: voice latency, RAM of both shells, what breaks on which runner.
+Every behavior is covered by a 31-part self-test and CI on three OSes.
+If something looks wrong to you, the journal is there to prove it right
+or wrong — that is the whole point of it.
+
+A character gallery, live language switching and a weekly-rhythm pattern
+shipped after the 0.1.0 tag — see [CHANGELOG.md](CHANGELOG.md).
+
 ## Roadmap
 
-- More languages (the i18n core is done — ru/en now)
-- Character gallery / sharing personalities
+- More languages (the i18n registry is done — a language is one
+  `Register()` plus its dictionary; ru/en now)
 
 Contributions welcome — pick something from PLAN.md, the discipline there
 is: measurements over vibes.
