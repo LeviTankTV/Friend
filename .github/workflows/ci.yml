@@ -96,6 +96,8 @@ jobs:
           '
           echo "--- строки помощника ---"
           cat /tmp/focus-lines.txt
+          # Диагностика цепочки x11: какое звено вернуло пустоту.
+          go run ./cmd/focusdbg || true
           grep -q xterm /tmp/focus-lines.txt
       # Живая проверка этапа 8а: нативный протокол PulseAudio читает
       # монитор дефолтного sink — играем синус в null-sink и требуем
