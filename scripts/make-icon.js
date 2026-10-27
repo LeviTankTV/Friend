@@ -111,20 +111,23 @@ app.whenReady().then(async () => {
     app.exit(1);
     return;
   }
-  // Квадрат по большей стороне, центрированный; resize в 256 через Electron.
+  // Квадрат по большей стороне, центрированный. PNG — 512×512: mac dmg у
+  // electron-builder требует иконку минимум 512 (находка CI). ICO — 256
+  // (Windows-формат со времён Vista; icoFromPng ждёт кадр ≤256).
   const side = Math.max(x1 - x0, y1 - y0);
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   const sx = Math.max(0, Math.round(cx - side / 2));
   const sy = Math.max(0, Math.round(cy - side / 2));
   const sw = Math.min(side, width - sx), sh = Math.min(side, height - sy);
   const cropped = img.crop({ x: sx, y: sy, width: sw, height: sh });
-  const final = cropped.resize({ width: 256, height: 256 });
+  const final512 = cropped.resize({ width: 512, height: 512 });
+  const final256 = cropped.resize({ width: 256, height: 256 });
   const outDir = path.join(__dirname, '..', 'desktop', 'build');
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, 'icon.ico');
-  fs.writeFileSync(out, icoFromPng(final.toPNG()));
-  // PNG-превью для проверки человеком (и README).
-  fs.writeFileSync(path.join(outDir, 'icon.png'), final.toPNG());
+  fs.writeFileSync(out, icoFromPng(final256.toPNG()));
+  // PNG для mac dmg и Tauri (минимум 512).
+  fs.writeFileSync(path.join(outDir, 'icon.png'), final512.toPNG());
   console.log('make-icon: готово —', out, '(' + fs.statSync(out).size + ' байт)');
   if (serverProc) serverProc.kill();
   app.exit(0);
