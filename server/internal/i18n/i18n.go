@@ -405,11 +405,33 @@ var EN = Dict{
 		"ask how it is going — no report and no \"I remember you told me\".",
 }
 
-// For возвращает словарь по коду языка. Всё, что не «en», — русский: битый
+// registry — реестр языков (роадмап «новые языки»): новый язык
+// подключается Register-ом, а не новой веткой в For.
+var registry = map[string]*Dict{
+	"ru": &RU,
+	"en": &EN,
+}
+
+// Register — добавить язык в реестр. Чек-лист нового языка (всё по образцу
+// ru/en, тесты не пустят кривого):
+//  1. Dict со ВСЕМИ полями — пустые поля тест i18n не пропустит; тон держать
+//     «одна живая реплика», как в RU/EN;
+//  2. словарь страницы web/js/lang/<code>.js (подхватывается FRIEND_LANG);
+//  3. голос: маппинг в tts.SetLanguage или voice.edge_voice в конфиге;
+//  4. wake: таблица узнавания имени (internal/wake);
+//  5. STT: код языка (internal/stt);
+//  6. стоп-слова FTS (internal/memory);
+//  7. persona-файл mira.<code>.json + go:embed в internal/persona;
+//  8. wake/стоp-слова тесты — таблицы по живым находкам.
+func Register(code string, d *Dict) {
+	registry[strings.ToLower(strings.TrimSpace(code))] = d
+}
+
+// For возвращает словарь по коду языка. Неизвестный код — русский: битый
 // код в конфиге не должен молча ломать личность.
 func For(lang string) *Dict {
-	if strings.EqualFold(strings.TrimSpace(lang), "en") {
-		return &EN
+	if d, ok := registry[strings.ToLower(strings.TrimSpace(lang))]; ok {
+		return d
 	}
 	return &RU
 }
