@@ -22,6 +22,7 @@ const (
 	PropActive = "_NET_ACTIVE_WINDOW"
 	PropName   = "_NET_WM_NAME"
 	PropPID    = "_NET_WM_PID"
+	PropClass  = "WM_CLASS"
 
 	RootWindow = 0x1ff // классический id root-окна: им и пользуемся
 

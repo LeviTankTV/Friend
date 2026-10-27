@@ -2,6 +2,7 @@ package x11
 
 import (
 	"encoding/binary"
+	"strings"
 )
 
 // Запросы высокого уровня: активное окно, имя окна, pid процесса,
@@ -120,6 +121,27 @@ func (c *Client) WindowPID(w uint32) uint32 {
 		return 0
 	}
 	return binary.LittleEndian.Uint32(raw[:4])
+}
+
+// WindowClass — WM_CLASS окна (instance\x00class\x00): fallback имени процесса
+// для окон без _NET_WM_PID (xterm и многие X-приложения pid не сообщают).
+// Возвращаем instance в нижнем регистре — он совпадает с именем процесса.
+func (c *Client) WindowClass(w uint32) string {
+	atom, err := c.internAtom(PropClass)
+	if err != nil {
+		return ""
+	}
+	raw, err := c.propRaw(w, atom)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	// Формат: instance\x00class\x00. Берём instance; пустой — class.
+	parts := strings.SplitN(stripNul(raw), "\x00", 2)
+	name := parts[0]
+	if name == "" && len(parts) > 1 {
+		name = parts[1]
+	}
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // WindowGeometry — прямоугольник окна (GetGeometry): x, y, ширина, высота.

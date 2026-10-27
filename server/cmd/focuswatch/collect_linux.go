@@ -80,8 +80,18 @@ func current(cl *x11.Client) sample {
 		return sample{}
 	}
 	pid := cl.WindowPID(w)
+	name := ""
+	if pid > 0 {
+		name = processName(pid)
+	}
+	// Окно без _NET_WM_PID (xterm на образах CI и многие X-приложения) —
+	// имя процесса берём из WM_CLASS, иначе окно для нас не существует
+	// (находка CI: проверка X11 не была зелёной ни одного прогона).
+	if name == "" {
+		name = cl.WindowClass(w)
+	}
 	s := sample{
-		Process: processName(pid),
+		Process: name,
 		Title:   cl.WindowName(w),
 		Idle:    cl.IdleSeconds(),
 	}
