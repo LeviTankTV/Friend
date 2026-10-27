@@ -477,6 +477,29 @@
   })();
   window.friendMemory = memory;
 
+  // --- живая иконка трея (оболочка Tauri) ----------------------------------
+  //
+  // capturePage у Tauri нет, зато канвас уже нарисован ЗДЕСЬ: сэмплируем его
+  // в 16×16 RGBA и отдаём оболочке каждые 2.5 с — тот же контракт, что у
+  // Электрона (снимок окна + resize до 16 px по высоте). Ветка Electron не
+  // получает setTrayIcon (там оболочка снимает окно сама) и фидер не заводится.
+  if (bridge.setTrayIcon) {
+    const trayBox = document.createElement('canvas');
+    trayBox.width = 16;
+    trayBox.height = 16;
+    const trayCtx = trayBox.getContext('2d');
+    setInterval(() => {
+      try {
+        trayCtx.clearRect(0, 0, 16, 16);
+        trayCtx.drawImage(app.view, 0, 0, 16, 16);
+        const d = trayCtx.getImageData(0, 0, 16, 16).data;
+        bridge.setTrayIcon(Array.prototype.slice.call(d), 16, 16);
+      } catch (_err) {
+        // Канвас ещё не готов (страница собирается) — попробуем в следующий тик.
+      }
+    }, 2500);
+  }
+
   // applySize — размер персонажа. Спрайт масштабируется целиком (сетка та же),
   // окно подгоняется под новый размер, а её ноги остаются на месте: иначе
   // персонаж «прыгал» бы при каждом движении ползунка.

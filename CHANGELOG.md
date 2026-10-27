@@ -19,6 +19,15 @@ The dev diary with measurements lives in [PLAN.md](PLAN.md).
   ONE warm «I'm here, I notice» line — at most once a week, quiet hours
   don't mute it, anti-spam gap still applies. Facts only, no guessing: the
   same discipline as the sleep-deprivation pattern.
+- **Settings survive page reloads.** A crash-recovery reload used to roll
+  the size and seat back to the values from app start; now the page re-reads
+  the settings file (both shells).
+- **Tauri shell.** A parallel Rust shell (`desktop-tauri/`) alongside
+  Electron: transparent always-on-top window over the same Go server, the
+  full IPC bridge as native commands, tray (live icon fed from the page
+  canvas), autostart, single instance, a render watchdog and a `--selftest`
+  shell-level gate with exit code. CI builds and self-tests it on all
+  three OSes.
 - Self-test grew to 31 parts: memory (seed a fact via `запомни:`, delete it
   through the panel, verify it left memory) and language (en → ru round-trip
   checked on the page, in the menu buttons and in `/healthz`).

@@ -204,6 +204,10 @@ window.FriendBridge = (function () {
       inv('replay_focus');
     };
     api.workArea = async () => await inv('work_area');
+    // Живая иконка трея: страница сэмплирует свой канвас (capturePage у
+    // Tauri нет) и присылает 16×16 RGBA. Ветке Electron не нужна — там
+    // оболочка снимает окно сама.
+    api.setTrayIcon = (rgba, w, h) => inv('set_tray_icon', { rgba: rgba, width: w, height: h });
     // Пульс кадров для сторожа оболочки (BEAT_TIMEOUT): страница зовёт на
     // каждом кадре — команда копеечная, но сторож обязан видеть жизнь.
     api.beat = () => { inv('beat'); };

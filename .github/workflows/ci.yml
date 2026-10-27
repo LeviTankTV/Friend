@@ -239,4 +239,17 @@ jobs:
         run: cd desktop-tauri && npm ci
       - name: cargo build (без инсталляторов)
         run: cd desktop-tauri && npx tauri build --no-bundle
+      # Уровень-гейт Tauri: сервер, страница, окно, зажим, настройки, трей,
+      # автозапуск, помощник. Page-часть (31 пункт) гоняет Electron-оболочка —
+      # страница у них общая. Linux под xvfb — информативно до стабилизации
+      # (webkit в голом X не обкатан), Windows/macOS — блокирующе.
+      - name: Самопроверка оболочки Tauri
+        if: matrix.os != 'ubuntu-latest'
+        run: |
+          cd desktop-tauri/src-tauri/target/release
+          if [ -f friend-tauri.exe ]; then ./friend-tauri.exe --selftest; else ./friend-tauri --selftest; fi
+      - name: Самопроверка оболочки Tauri (xvfb, linux, информативная)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: cd desktop-tauri/src-tauri/target/release && xvfb-run -a ./friend-tauri --selftest
 

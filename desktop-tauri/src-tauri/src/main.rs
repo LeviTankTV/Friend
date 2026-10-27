@@ -22,6 +22,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 const SERVER_ADDR: &str = "127.0.0.1:8787";
+
+/// Режим самопроверки оболочки (--selftest): прогнать уровень-гейт и выйти
+/// с кодом 0/1. Page-часть (31 пункт) — в Electron-самопроверке.
+fn selftest() -> bool {
+    std::env::args().any(|a| a == "--selftest")
+}
 // Сколько молчания страницы = поломка отрисовки (как BEAT_TIMEOUT у Электрона).
 const BEAT_TIMEOUT_MS: u128 = 9000;
 const FOCUS_INTERVAL_SECS: u64 = 4;
@@ -29,13 +35,13 @@ const SOUND_INTERVAL_MS: u64 = 200;
 
 /// Позиция окна в ЛОГИЧЕСКИХ пикселях (DIP) — та же единица, что у страницы
 /// и Electron-оболочки; физические делим на масштаб.
-#[derive(Serialize, Clone, Copy)]
+#[derive(Serialize, Clone, Copy, Debug)]
 struct Pos {
     x: i32,
     y: i32,
 }
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Serialize, Clone, Copy, Debug)]
 struct Area {
     x: i32,
     y: i32,
@@ -118,6 +124,122 @@ fn wait_healthz(timeout: Duration) -> bool {
     false
 }
 
+/// healthz_get — тело /healthz как JSON. Голый HTTP/1.0: лишних
+/// зависимостей ради одного эндпойнта не заводим.
+fn healthz_get() -> Option<serde_json::Value> {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(SERVER_ADDR).ok()?;
+    s.write_all(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
+    let mut buf = String::new();
+    s.read_to_string(&mut buf).ok()?;
+    let body = buf.split("\r\n\r\n").nth(1)?;
+    serde_json::from_str(body.trim()).ok()
+}
+
+/// run_selftest — уровень-гейт Tauri-оболочки: те части Electron-самопроверки,
+/// которые живут в оболочке, а не на странице. Логи — в стиле Электрона,
+/// выход — код 0/1 (Page-часть на CI гоняет Electron-оболочка).
+fn run_selftest(handle: AppHandle, win: tauri::WebviewWindow) {
+    let mut all = true;
+
+    // 1. Сервер поднялся, язык ru (конфиг самопроверки его пинит).
+    let mut hz = None;
+    for _ in 0..40 {
+        if let Some(v) = healthz_get() {
+            hz = Some(v);
+            break;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    let ok_healthz = hz.as_ref().and_then(|v| v.get("ok").and_then(|b| b.as_bool())).unwrap_or(false);
+    let lang_ok = hz.as_ref().and_then(|v| v.get("language").and_then(|s| s.as_str())) == Some("ru");
+    println!("[friend] selftest: сервер — {} (язык {})",
+        if ok_healthz { "OK" } else { "ОШИБКА" }, if lang_ok { "OK" } else { "ОШИБКА" });
+    all &= ok_healthz && lang_ok;
+
+    // 2. Страница жива: ws-клиент подключился (мост, ассеты, канал — всё разом).
+    let mut clients = 0i64;
+    for _ in 0..40 {
+        if let Some(v) = healthz_get() {
+            clients = v.get("clients").and_then(|c| c.as_i64()).unwrap_or(0);
+            if clients >= 1 {
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    println!("[friend] selftest: страница подключилась — {}", if clients >= 1 { "OK" } else { "ОШИБКА" });
+    all &= clients >= 1;
+
+    // 3. Окно на экране.
+    let wa = primary_work_area(&handle);
+    let on_screen = win.outer_position().ok().and_then(|p| {
+        let s = win.scale_factor().ok()?;
+        let (x, y) = (p.x as f64 / s, p.y as f64 / s);
+        Some(x >= (wa.x - 300) as f64 && y >= (wa.y - 300) as f64
+            && x <= (wa.x + wa.width) as f64 && y <= (wa.y + wa.height) as f64)
+    }).unwrap_or(false);
+    println!("[friend] selftest: окно на экране — {}", if on_screen { "OK" } else { "ОШИБКА" });
+    all &= on_screen;
+
+    // 4. Зажим за краем: окно не пускает себя в «никуда». Честное свойство —
+    // часть окна остаётся на экране (48 px по горизонтали, 8 по вертикали):
+    // левая кромка при широком окне уходит в минус (0-488+48=-440) — это
+    // норма, находка первого прогона.
+    let _ = set_logical_pos(&handle, &win, -20000, -20000);
+    let rp = real_pos(&win);
+    let size = win.outer_size().unwrap_or_default();
+    let s = win.scale_factor().unwrap_or(1.0);
+    let (win_w, win_h) = (
+        (size.width as f64 / s).round() as i32,
+        (size.height as f64 / s).round() as i32,
+    );
+    let clamped = rp.map(|p| {
+        p.x + win_w >= wa.x + 48 && p.y + win_h >= wa.y + 8
+    }).unwrap_or(false);
+    println!("[friend] selftest: зажим за краем — {} (позиция {:?}, размер {}x{}, рабочая область {:?})",
+        if clamped { "OK" } else { "ОШИБКА" }, rp, win_w, win_h, wa);
+    all &= clamped;
+
+    // 5. Настройки: round-trip через файл с восстановлением чужого выбора.
+    let before = get_settings(handle.state());
+    save_settings(handle.state(), r#"{"pix":7,"seat":"free"}"#.into());
+    let rt = get_settings(handle.state());
+    let rt_ok = rt.as_deref() == Some(r#"{"pix":7,"seat":"free"}"#);
+    if let Some(b) = before {
+        save_settings(handle.state(), b);
+    }
+    println!("[friend] selftest: настройки — {}", if rt_ok { "OK" } else { "ОШИБКА" });
+    all &= rt_ok;
+
+    // 6. Трей поднят.
+    let tray_ok = handle.tray_by_id("main").is_some();
+    println!("[friend] selftest: трей — {}", if tray_ok { "OK" } else { "ОШИБКА" });
+    all &= tray_ok;
+
+    // 7. Автозапуск: ключ пишется и снимается (реестр HKCU).
+    let en_on = autostart(handle.clone(), true);
+    let en_off = !autostart(handle.clone(), false);
+    let auto_ok = en_on && en_off;
+    println!("[friend] selftest: автозапуск — {}", if auto_ok { "OK" } else { "ОШИБКА" });
+    all &= auto_ok;
+
+    // 8. Помощник жив (stdin-сторож не съел его за первые секунды).
+    thread::sleep(Duration::from_secs(4));
+    let fw_alive = handle.try_state::<Shell>().map(|shell| {
+        let mut g = shell.focus.lock().unwrap();
+        g.as_mut().map(|c| c.try_wait().map(|w| w.is_none()).unwrap_or(true)).unwrap_or(false)
+    }).unwrap_or(false);
+    println!("[friend] selftest: помощник жив — {}", if fw_alive { "OK" } else { "ОШИБКА" });
+    all &= fw_alive;
+
+    // Домашний угол: окно остаётся там, где человек его ожидает.
+    let _ = set_logical_pos(&handle, &win, wa.x + wa.width - 400, wa.y + wa.height - 520);
+
+    println!("[friend] selftest: маяк — выход");
+    handle.exit(if all { 0 } else { 1 });
+}
+
 // --- геометрия ------------------------------------------------------------
 
 fn scale(win: &tauri::WebviewWindow) -> f64 {
@@ -155,7 +277,22 @@ fn primary_work_area(app: &AppHandle) -> Area {
 /// Поставить окно в логическую точку, вернув ГДЕ ОНО ОКАЗАЛОСЬ: оболочка
 /// держит окно в видимой части экрана и не пускает за край — страница
 /// обязана узнать настоящее место (иначе окно «возвращалось бы в никуда»).
-fn set_logical_pos(win: &tauri::WebviewWindow, x: i32, y: i32) -> Result<Pos, String> {
+fn set_logical_pos(
+    app: &AppHandle,
+    win: &tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+) -> Result<Pos, String> {
+    // Зажим в видимую часть экрана — ЗДЕСЬ, а не в отдельной команде: у
+    // Электрона клампит любая посадка, и страница рассчитывает на это
+    // (report в bridge.js сверяет «просили» с «оказалось»). Без зажима
+    // окно уезжает за край и персонаж «пропадает».
+    let wa = primary_work_area(app);
+    let s = win.scale_factor().unwrap_or(1.0);
+    let size = win.outer_size().unwrap_or_default();
+    let win_w = (size.width as f64 / s).round() as i32;
+    let x = x.clamp(wa.x - win_w + 48, wa.x + wa.width - 48);
+    let y = y.clamp(wa.y - 8, wa.y + wa.height - 48);
     win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
         x as f64, y as f64,
     )))
@@ -250,14 +387,14 @@ fn stop_sound(shell: &Shell) {
 // --- команды моста (invoke) ------------------------------------------------
 
 #[tauri::command]
-fn move_by(win: tauri::WebviewWindow, dx: i32, dy: i32) -> Result<Pos, String> {
+fn move_by(app: AppHandle, win: tauri::WebviewWindow, dx: i32, dy: i32) -> Result<Pos, String> {
     let cur = real_pos(&win).ok_or("позиция не читается")?;
-    set_logical_pos(&win, cur.x + dx, cur.y + dy)
+    set_logical_pos(&app, &win, cur.x + dx, cur.y + dy)
 }
 
 #[tauri::command]
-fn set_position(win: tauri::WebviewWindow, x: i32, y: i32) -> Result<Pos, String> {
-    set_logical_pos(&win, x, y)
+fn set_position(app: AppHandle, win: tauri::WebviewWindow, x: i32, y: i32) -> Result<Pos, String> {
+    set_logical_pos(&app, &win, x, y)
 }
 
 #[tauri::command]
@@ -271,7 +408,6 @@ fn set_bounds(
     win: tauri::WebviewWindow,
     b: Bounds,
 ) -> Result<Pos, String> {
-    let s = scale(&win);
     if let (Some(w), Some(h)) = (b.width, b.height) {
         let w = w.max(60).min(2000);
         let h = h.max(60).min(2000);
@@ -283,15 +419,8 @@ fn set_bounds(
     let cur = real_pos(&win).ok_or("позиция не читается")?;
     let x = b.x.unwrap_or(cur.x);
     let y = b.y.unwrap_or(cur.y);
-    // Не пускаем окно за край экрана (та же забота, что у Electron-оболочки):
-    // полностью спрятанное окно = пропавший персонаж.
-    let wa = primary_work_area(&app);
-    let size = win.outer_size().map(|sz| sz).unwrap_or_default();
-    let win_w = (size.width as f64 / s).round() as i32;
-    let _win_h = (size.height as f64 / s).round() as i32;
-    let x = x.clamp(wa.x - win_w + 48, wa.x + wa.width - 48);
-    let y = y.clamp(wa.y - 8, wa.y + wa.height - 48);
-    set_logical_pos(&win, x, y)
+    // Зажим за край — в set_logical_pos (общий для всех посадок).
+    set_logical_pos(&app, &win, x, y)
 }
 
 #[tauri::command]
@@ -376,6 +505,20 @@ fn replay_focus(app: AppHandle, shell: State<Shell>) {
     }
 }
 
+#[tauri::command]
+fn set_tray_icon(app: AppHandle, rgba: Vec<u8>, width: u32, height: u32) -> Result<(), String> {
+    // Живая иконка трея без capturePage: страница сама сэмплирует свой канвас
+    // (16×16 RGBA) и присылает. У Электрона это capturePage+resize — результат
+    // тот же: в трее её текущая причёска и поза. Пустой канвас не ставим,
+    // базовое лицо остаётся (как у Электрона).
+    if rgba.len() != (width as usize) * (height as usize) * 4 || width == 0 || height == 0 {
+        return Err("иконка не по размеру".into());
+    }
+    let tray = app.tray_by_id("main").ok_or("трей не поднят")?;
+    tray.set_icon(Some(tauri::image::Image::new(&rgba, width, height)))
+        .map_err(|e| e.to_string())
+}
+
 /// Показать/спрятать окно (трей: пункт меню и двойной клик).
 fn toggle_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -400,7 +543,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             move_by, set_position, get_position, set_bounds, set_size, always_on_top,
             work_area, focus, quit, beat, autostart, dance, save_settings, get_settings,
-            replay_focus,
+            replay_focus, set_tray_icon,
         ])
         .on_window_event(|window, event| {
             // Закрытие окна — прячем в трей: персонаж живёт в системе, как у
@@ -416,14 +559,37 @@ fn main() {
             let settings = settings_path(&handle);
 
             // Сервер: -web <каталог страницы> -addr 127.0.0.1:8787 (как у Электрона).
+            // В самопроверке — временный конфиг: проактив молчит (реплики-инициативы
+            // не врываются в замеры), язык ru — какой бы ни был пользовательский.
             let server_bin = bin_dir.join(if cfg!(windows) { "companion.exe" } else { "companion" });
+            let mut server_args = vec![
+                "-web".to_string(),
+                web_dir.to_string_lossy().into_owned(),
+                "-addr".to_string(),
+                SERVER_ADDR.to_string(),
+            ];
+            if selftest() {
+                let user_cfg = std::env::var("APPDATA").ok()
+                    .map(|d| PathBuf::from(d).join("Friend").join("config.json"));
+                let mut base: serde_json::Value = user_cfg
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(serde_json::json!({}));
+                if !base["avatar"].is_object() {
+                    base["avatar"] = serde_json::json!({});
+                }
+                base["avatar"]["language"] = serde_json::json!("ru");
+                if !base["proactive"].is_object() {
+                    base["proactive"] = serde_json::json!({});
+                }
+                base["proactive"]["enabled"] = serde_json::json!(false);
+                let tmp = std::env::temp_dir().join("mira-tauri-selftest.json");
+                let _ = std::fs::write(&tmp, serde_json::to_string(&base).unwrap_or_default());
+                server_args.push("-config".into());
+                server_args.push(tmp.to_string_lossy().into_owned());
+            }
             let child = Command::new(&server_bin)
-                .args([
-                    "-web",
-                    web_dir.to_string_lossy().as_ref(),
-                    "-addr",
-                    SERVER_ADDR,
-                ])
+                .args(server_args)
                 // Логи сервера — в консоль оболочки (как у Электрона). Piped без
                 // читателя забил бы буфер и заблокировал сервер на первом же
                 // логе (находка прогона).
@@ -525,6 +691,15 @@ fn main() {
                         let _ = w.eval("location.reload()");
                     }
                 });
+            }
+
+            // Самопроверка оболочки (уровень-гейт Tauri): сервер, связь, окно,
+            // зажим, настройки, трей, автозапуск, помощник. Page-часть (31
+           // пункт) живёт в Electron-самопроверке — страница у них общая.
+            if selftest() {
+                let h = handle.clone();
+                let w = win.clone();
+                thread::spawn(move || run_selftest(h, w));
             }
             Ok(())
         })
