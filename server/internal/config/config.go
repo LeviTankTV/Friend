@@ -81,11 +81,11 @@ type LLM struct {
 // заговаривает первой (планировщик молчит); внутреннее состояние, реакция на
 // реплики и ответы на вопрос продолжают работать.
 type Proactive struct {
-	Enabled       bool `json:"enabled"`
-	TickSeconds   int  `json:"tick_seconds"`
-	MinGapMinutes int  `json:"min_gap_minutes"`
-	QuietFromHour int  `json:"quiet_from_hour"`
-	QuietToHour   int  `json:"quiet_to_hour"`
+	Enabled         bool `json:"enabled"`
+	TickSeconds     int  `json:"tick_seconds"`
+	MinGapMinutes   int  `json:"min_gap_minutes"`
+	QuietFromHour   int  `json:"quiet_from_hour"`
+	QuietToHour     int  `json:"quiet_to_hour"`
 	FoodReminderMin int  `json:"food_reminder_minutes"`
 }
 
@@ -293,6 +293,29 @@ func ConfigPathFromArgs(args []string) string {
 
 func defaultConfigPath() string {
 	return filepath.Join(defaultStateDir(), "config.json")
+}
+
+// DefaultPath — где лежит конфиг по умолчанию (Load без пути читает его же).
+// Нужен снаружи: галерея характеров пишет выбор человека в persona.file
+// именно этого файла.
+func DefaultPath() string { return defaultConfigPath() }
+
+// Save — конфиг обратно на диск (галерея характера пишет persona.file).
+// Запись через временный файл и переименование: обрыв не оставляет
+// половину конфига — его читают при каждом запуске.
+func Save(path string, cfg Config) error {
+	if path == "" {
+		path = defaultConfigPath()
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // DataDir — каталог данных компаньона (конфиг и состояние по умолчанию).

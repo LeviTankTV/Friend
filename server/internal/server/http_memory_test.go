@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -266,5 +268,73 @@ func TestCorsForTauriPage(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatalf("GET без ACAO: %q", resp2.Header.Get("Access-Control-Allow-Origin"))
+	}
+}
+
+// Галерея характеров (этап 16): GET — витрина файлов каталога персон,
+// POST — применение только своих файлов; чужой путь и не-json — 400.
+func TestPersonasRoute(t *testing.T) {
+	ts, hub, _ := newMemoryHTTP(t)
+	dir := t.TempDir()
+	hub.SetPersonaDir(dir)
+	hub.SetPersonaFile(filepath.Join(dir, "mira.json"))
+	if err := os.WriteFile(filepath.Join(dir, "mira.json"),
+		[]byte(`{"name":"Мира","language":"ru"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "friend.json"),
+		[]byte(`{"name":"Друг","language":"ru"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	applied := ""
+	hub.SetPersonaHook(func(file string) error { applied = file; return nil })
+
+	resp, err := http.Get(ts.URL + "/personas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Current string `json:"current"`
+		List    []struct {
+			File string `json:"file"`
+			Name string `json:"name"`
+		} `json:"list"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if out.Current != filepath.Join(dir, "mira.json") || len(out.List) != 2 {
+		t.Fatalf("витрина: current=%q list=%d", out.Current, len(out.List))
+	}
+
+	// Применение своего файла — ок, хук получил чистый путь.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/personas",
+		strings.NewReader(`{"file":"friend.json"}`))
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK || applied == "" {
+		t.Fatalf("применение: код %d applied=%q", resp2.StatusCode, applied)
+	}
+	if filepath.Base(applied) != "friend.json" {
+		t.Fatalf("хук получил %q", applied)
+	}
+
+	// Чужой путь НЕ проходит: filepath.Base схлопывает его в имя файла
+	// внутри каталога персон («../../etc/passwd.json» → «passwd.json»),
+	// поэтому снаружи применить можно только то, что лежит в витрине.
+	req3, _ := http.NewRequest(http.MethodPost, ts.URL+"/personas",
+		strings.NewReader(`{"file":"../../etc/passwd.json"}`))
+	resp3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK || filepath.Base(applied) != "passwd.json" {
+		t.Fatalf("чужой путь должен схлопнуться в каталог: код %d applied=%q",
+			resp3.StatusCode, applied)
 	}
 }

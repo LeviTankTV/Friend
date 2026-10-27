@@ -241,3 +241,49 @@ func TestLoadForPinsLanguage(t *testing.T) {
 		t.Fatalf("встроенный en-характер: %+v", p.Name)
 	}
 }
+
+// ListDir (галерея, этап 16): валидные характеры в списке, битые и не-JSON
+// пропущены, отсутствие каталога — пустая витрина, не ошибка.
+func TestListDir(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("mira.json", `{"name":"Мира","language":"ru"}`)
+	write("friend.json", `{"name":"Друг","language":"ru"}`)
+	write("broken.json", `{не json`)
+	write("no-name.json", `{"language":"ru"}`)
+	write("readme.txt", "не json вовсе")
+	if err := os.Mkdir(filepath.Join(dir, "subdir.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := ListDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("ожидал 2 валидных характера, получил %d: %+v", len(list), list)
+	}
+	names := map[string]bool{}
+	for _, info := range list {
+		names[info.Name] = true
+		if info.File == "" || info.Language == "" {
+			t.Fatalf("запись без файла/языка: %+v", info)
+		}
+	}
+	if !names["Мира"] || !names["Друг"] {
+		t.Fatalf("имена не те: %+v", list)
+	}
+
+	// Каталога нет — пустая витрина без ошибки.
+	empty, err := ListDir(filepath.Join(dir, "нет-такого"))
+	if err != nil {
+		t.Fatalf("отсутствие каталога — не ошибка: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("пустой каталог вернул записи: %+v", empty)
+	}
+}

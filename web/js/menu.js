@@ -240,6 +240,7 @@ window.FriendMenu = (function () {
       ['action.wave', () => o.onWave && o.onWave()],
       ['action.home', () => o.onHome && o.onHome()],
       ['action.memory', () => o.onMemory && o.onMemory()],
+      ['action.personas', () => o.onPersonas && o.onPersonas()],
       ['action.quit', () => o.onQuit && o.onQuit()],
     ];
     const actionButtons = [];

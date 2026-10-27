@@ -143,6 +143,40 @@ func New(opts Options) (*http.Server, error) {
 	mux.HandleFunc("/memory", memory)
 	mux.HandleFunc("/memory/", memory)
 
+	// Галерея характеров (этап 16): GET — витрина (файлы в каталоге персон
+	// рядом с текущим), POST — применение выбранного. Применение валидирует
+	// LoadFor и обновляет имя/матчер живьём; выбор пишет main.go в конфиг.
+	mux.HandleFunc("/personas", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			list, cur, err := opts.Hub.Personas()
+			if err != nil {
+				http.Error(w, "галерея не читается: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(map[string]any{"current": cur, "list": list})
+		case http.MethodPost:
+			var in struct {
+				File string `json:"file"`
+			}
+			if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in); err != nil || in.File == "" {
+				http.Error(w, "нужен {\"file\": \"...\"}", http.StatusBadRequest)
+				return
+			}
+			if err := opts.Hub.ApplyPersona(in.File); err != nil {
+				http.Error(w, "характер не применился: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.Error(w, "галерею показывают GET-ом, применяют POST-ом", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// Внешний арт (этап 6): страница сама решает, есть ли лист — она просит
 	// /sprites/sheet.json и получает 404, когда человек арт не подкладывал.
 	// Поэтому здесь просто каталог, как и весь фронтенд — без кэша: правки

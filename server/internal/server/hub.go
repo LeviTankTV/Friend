@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"friend/internal/memory"
 	"friend/internal/mood"
 	"friend/internal/moodread"
+	"friend/internal/persona"
 	"friend/internal/state"
 	"friend/internal/wake"
 )
@@ -105,6 +107,13 @@ type Hub struct {
 	// langHook — что пересобрать при смене языка (этап 13): характер,
 	// голос, STT. Ставится из main.go: он один знает, где лежат их источники.
 	langHook func(code string)
+	// personaHook — смена файла характера (галерея, этап 16): LoadFor +
+	// компаньон + имя знает только запускающий код.
+	personaHook func(file string) error
+	// personaDir/personaFile — каталог характеров и текущий файл: галерея
+	// показывает первый, применяет файлы только из него (чужой путь мимо).
+	personaDir  string
+	personaFile string
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
@@ -162,6 +171,59 @@ func (h *Hub) SetLanguage(code string) {
 	}
 	h.log.Info("язык поменялся", "language", code)
 	h.Broadcast(LangMsg{Type: TypeLang, Language: code})
+}
+
+// SetPersonaHook подключает смену файла характера (галерея, этап 16).
+func (h *Hub) SetPersonaHook(fn func(file string) error) { h.personaHook = fn }
+
+// SetPersonaDir/SetPersonaFile — где лежат характеры и какой активен.
+func (h *Hub) SetPersonaDir(dir string) {
+	h.mu.Lock()
+	h.personaDir = dir
+	h.mu.Unlock()
+}
+
+func (h *Hub) SetPersonaFile(file string) {
+	h.mu.Lock()
+	h.personaFile = file
+	h.mu.Unlock()
+}
+
+// Personas — витрина галереи: список файлов характеров и текущий.
+func (h *Hub) Personas() ([]persona.PersonaInfo, string, error) {
+	h.mu.Lock()
+	dir := h.personaDir
+	cur := h.personaFile
+	h.mu.Unlock()
+	list, err := persona.ListDir(dir)
+	return list, cur, err
+}
+
+// ApplyPersona — живая смена характера: файл ТОЛЬКО из каталога персон
+// (чужой путь отсечён), применение через hook (LoadFor валидирует), имя и
+// матчер её имени обновляются вместе с характером.
+func (h *Hub) ApplyPersona(file string) error {
+	if h.personaHook == nil {
+		return errors.New("смена характера не подключена")
+	}
+	h.mu.Lock()
+	dir := h.personaDir
+	h.mu.Unlock()
+	clean := filepath.Clean(filepath.Join(dir, filepath.Base(file)))
+	if !strings.HasSuffix(strings.ToLower(clean), ".json") {
+		return errors.New("файл характера — только .json")
+	}
+	if clean != filepath.Clean(dir) && !strings.HasPrefix(clean, filepath.Clean(dir)+string(filepath.Separator)) {
+		return errors.New("файл характера должен лежать в каталоге персон")
+	}
+	if err := h.personaHook(clean); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	h.personaFile = clean
+	h.mu.Unlock()
+	h.log.Info("характер сменён", "file", clean)
+	return nil
 }
 
 // MemoryStore — долгая память для хаба (реализация — internal/memory.Store).

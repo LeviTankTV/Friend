@@ -56,6 +56,7 @@
     'action.wave': 'wave',
     'action.home': 'home',
     'action.memory': 'what she knows',
+    'action.personas': 'characters',
     'action.quit': 'quit',
     'menu.hint': 'right click — menu, drag — move, wheel — size',
 
@@ -76,6 +77,15 @@
     'memory.hint': 'facts live in a local SQLite file and never leave the machine',
     'memory.err': 'memory did not load: {reason}',
     'memory.errDelete': 'the fact did not delete: {reason}',
+
+    // main.js: character gallery (stage 16)
+    'personas.aria': 'character gallery',
+    'personas.title': 'characters',
+    'personas.empty': 'no character files yet. Drop your character (JSON) next to mira.json or into the personas data folder',
+    'personas.current': 'current',
+    'personas.applying': 'switching character…',
+    'personas.err': 'the character did not apply: {reason}',
+    'personas.hint': 'character files are JSON in the personas folder; drop yours there too',
 
     // main.js
     'wake.dotTitle': '{name} listens only for her name: audio is transcribed locally and never recorded',

@@ -22,6 +22,11 @@ The dev diary with measurements lives in [PLAN.md](PLAN.md).
 - **Settings survive page reloads.** A crash-recovery reload used to roll
   the size and seat back to the values from app start; now the page re-reads
   the settings file (both shells).
+- **Character gallery.** Right-click menu → «characters»: pick a persona
+  from JSON files in the personas folder (next to your mira.json). Applying
+  one is live — LoadFor validates, her name and wake matcher update, the
+  choice persists in the config. Path traversal collapses into the gallery
+  folder; outside files cannot be applied.
 - **Tauri shell.** A parallel Rust shell (`desktop-tauri/`) alongside
   Electron: transparent always-on-top window over the same Go server, the
   full IPC bridge as native commands, tray (live icon fed from the page

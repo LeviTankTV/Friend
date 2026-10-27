@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -306,4 +307,45 @@ func langName(d *i18n.Dict, code string) string {
 	default:
 		return d.LangNameAny
 	}
+}
+
+// --- Галерея характеров (этап 16): файлы рядом с твоим mira.json -----------
+
+// PersonaInfo — запись галереи: файл и кто в нём.
+type PersonaInfo struct {
+	File     string `json:"file"`
+	Name     string `json:"name"`
+	Language string `json:"language"`
+}
+
+// ListDir — все *.json в каталоге характеров: имя и язык каждого.
+// Битые файлы и файлы без имени пропускаются: галерея — витрина, а не аудит.
+// Каталога нет — галерея пуста, и это честно (характеры встроены).
+func ListDir(dir string) ([]PersonaInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := []PersonaInfo{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var head struct {
+			Name     string `json:"name"`
+			Language string `json:"language"`
+		}
+		if json.Unmarshal(raw, &head) != nil || head.Name == "" {
+			continue
+		}
+		out = append(out, PersonaInfo{File: e.Name(), Name: head.Name, Language: head.Language})
+	}
+	return out, nil
 }

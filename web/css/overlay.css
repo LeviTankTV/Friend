@@ -390,6 +390,24 @@ body:not(.menu-left):not(.menu-right) .memory { left: 6px; }
 .memory-fact button:hover { background: rgba(120, 60, 70, 0.9); }
 .memory-empty { opacity: 0.6; font-size: 11.5px; padding: 10px 2px; }
 .memory-more { display: block; width: 100%; margin-top: 8px; }
+
+/* Галерея персонажей (этап 16): панель переиспользует .memory; здесь —
+   строки-кнопки выбора характера. */
+.personas-item {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  padding: 7px 9px;
+  text-align: left;
+  border-radius: 8px;
+  border: 1px solid rgba(169, 201, 255, 0.22);
+  background: rgba(30, 38, 62, 0.9);
+  color: #eef1f8;
+  font-size: 12px;
+  cursor: pointer;
+}
+.personas-item:hover { background: rgba(45, 56, 86, 0.95); }
+.personas-item.on { border-color: rgba(108, 149, 255, 0.8); }
 .memory-close { display: block; width: 100%; margin-top: 6px; }
 
 /* Пока открыто меню, облачко и поле ввода прячутся: они делят с ним место в

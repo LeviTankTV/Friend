@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"sync/atomic"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -26,6 +25,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -82,7 +82,11 @@ func run() error {
 		return err
 	}
 
-	cfg, note, err := config.Load(*configPath)
+	cfgPath := *configPath
+	if cfgPath == "" {
+		cfgPath = config.DefaultPath() // галерея характера пишет выбор сюда
+	}
+	cfg, note, err := config.Load(cfgPath)
 	if err != nil {
 		return err
 	}
@@ -216,7 +220,7 @@ func run() error {
 	// решает, заговорить ли первой. Правила анти-спама и окна тишины — в
 	// internal/proactive; здесь только сбор входных данных и отправка.
 	sched := proactive.New(proactive.Config{
-		Enabled: cfg.Proactive.Enabled,
+		Enabled:       cfg.Proactive.Enabled,
 		MinGap:        time.Duration(cfg.Proactive.MinGapMinutes) * time.Minute,
 		FoodReminder:  time.Duration(cfg.Proactive.FoodReminderMin) * time.Minute,
 		QuietFromHour: cfg.Proactive.QuietFromHour,
@@ -249,6 +253,28 @@ func run() error {
 	// Живая смена языка (этап 13): хук знает, где лежат характер, голос и STT.
 	// Характер грузится заново под новый язык; если не поднялся — остаётся
 	// прежний (язык тоже не трогаем: характер и язык должны ездить вместе).
+	// Галерея характеров (этап 16): каталог — рядом с текущим файлом, а без
+	// него — personas в каталоге данных (туда человек и положит характеры).
+	personasDir := filepath.Join(config.DataDir(), "personas")
+	if cfg.Persona.File != "" {
+		personasDir = filepath.Dir(cfg.Persona.File)
+	}
+	hub.SetPersonaDir(personasDir)
+	hub.SetPersonaFile(cfg.Persona.File)
+	hub.SetPersonaHook(func(file string) error {
+		p, _, err := persona.LoadFor(file, curLang())
+		if err != nil {
+			return err
+		}
+		comp.SetProfile(p)
+		hub.SetName(p.Name)
+		// Выбор переживает перезапуск: persona.file в конфиге.
+		cfg.Persona.File = file
+		if err := config.Save(cfgPath, cfg); err != nil {
+			log.Warn("выбор характера не записался в конфиг", "err", err)
+		}
+		return nil
+	})
 	hub.SetLangHook(func(code string) {
 		p, note, err := persona.LoadFor(cfg.Persona.File, code)
 		if err != nil {
@@ -369,6 +395,7 @@ func keyHint(m *llm.Client, env dotenv.Result, candidates []string) string {
 //     companion.Speak, и следующий ответ модели видит, что она заговорила;
 //   - нет ключа — планировщик всё равно отмечает попытку: следующий заход
 //     прогреет дистанцию и не устроит «тихий стук» в закрытую дверь.
+//
 // lateNightsNow — сколько ночей за полночь за последнюю неделю он говорил с
 // ней (этап 11а). ok=false — архива нет или он не читается: паттернов без
 // данных не бывает.

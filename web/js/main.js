@@ -292,6 +292,7 @@
     onClose: () => growForMenu(false),
     onTalk: () => window.friendChat && window.friendChat.toggle(),
     onMemory: () => window.friendMemory && window.friendMemory.open(),
+    onPersonas: () => window.friendPersonas && window.friendPersonas.open(),
     onWave: () => avatar.wave(),
     onHome: () => goHome(),
     onQuit: () => { if (bridge.quit) bridge.quit(); },
@@ -480,6 +481,141 @@
     };
   })();
   window.friendMemory = memory;
+
+  // --- панель персонажей: галерея характеров (пункт меню) ------------------
+  //
+  // Характеры — JSON-файлы в каталоге персон (рядом с mira.json или в
+  // personas каталога данных). Сервер даёт GET /personas (витрина) и
+  // POST /personas/apply {file} — применяет живьём (LoadFor валидирует,
+  // имя и матчер её имени обновляются) и пишет выбор в конфиг. Страница
+  // после применения перезагружается: welcome несёт новое имя.
+  const personas = (function () {
+    const panel = document.createElement('div');
+    panel.className = 'memory';
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    const title = document.createElement('div');
+    title.className = 'menu-title';
+    panel.appendChild(title);
+    const list = document.createElement('div');
+    panel.appendChild(list);
+    const empty = document.createElement('div');
+    empty.className = 'memory-empty';
+    empty.hidden = true;
+    panel.appendChild(empty);
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'memory-close';
+    panel.appendChild(closeBtn);
+    const hint = document.createElement('div');
+    hint.className = 'menu-hint';
+    panel.appendChild(hint);
+    document.body.appendChild(panel);
+
+    let open = false;
+    let currentFile = '';
+
+    function labels() {
+      title.textContent = friendLang.L('personas.title');
+      panel.setAttribute('aria-label', friendLang.L('personas.aria'));
+      empty.textContent = friendLang.L('personas.empty');
+      closeBtn.textContent = friendLang.L('memory.close');
+      hint.textContent = friendLang.L('personas.hint');
+    }
+    labels();
+
+    function renderItem(info) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'personas-item';
+      row.textContent = info.name + (info.language ? ' · ' + info.language : '');
+      if (currentFile && info.file && currentFile.endsWith(info.file)) {
+        row.classList.add('on');
+        row.textContent += ' · ' + friendLang.L('personas.current');
+      }
+      row.addEventListener('click', () => {
+        hint.textContent = friendLang.L('personas.applying');
+        fetch(window.FriendServerURL('/personas/apply'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: info.file }),
+        })
+          .then((resp) => {
+            if (!resp.ok) {
+              return resp.text().then((t) => {
+                hint.textContent = friendLang.L('personas.err', { reason: t.trim() || String(resp.status) });
+              });
+            }
+            // Перезагрузка: welcome несёт новое имя и характер целиком.
+            window.location.reload();
+          })
+          .catch((err) => {
+            hint.textContent = friendLang.L('personas.err', { reason: String(err) });
+          });
+      });
+      list.appendChild(row);
+    }
+
+    function load() {
+      hint.textContent = friendLang.L('personas.hint');
+      return fetch(window.FriendServerURL('/personas'))
+        .then((resp) => {
+          if (!resp.ok) return resp.text().then((t) => { throw new Error(t.trim() || String(resp.status)); });
+          return resp.json();
+        })
+        .then((data) => {
+          list.textContent = '';
+          currentFile = data.current || '';
+          (data.list || []).forEach(renderItem);
+          empty.hidden = list.children.length > 0;
+        })
+        .catch((err) => {
+          hint.textContent = friendLang.L('personas.err', { reason: String(err) });
+        });
+    }
+
+    function openPanel() {
+      if (open) return;
+      open = true;
+      panel.hidden = false;
+      document.body.classList.add('menu-open');
+      labels();
+      growForMenu(true);
+      load();
+      if (bridge.focus) bridge.focus();
+    }
+
+    function closePanel() {
+      if (!open) return;
+      open = false;
+      panel.hidden = true;
+      document.body.classList.remove('menu-open');
+      growForMenu(false);
+    }
+
+    closeBtn.addEventListener('click', closePanel);
+    window.addEventListener('pointerdown', (ev) => {
+      if (!open) return;
+      if (panel.contains(ev.target)) return;
+      closePanel();
+    }, true);
+    window.addEventListener('keydown', (ev) => {
+      if (!open) return;
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closePanel();
+      }
+    }, true);
+
+    return {
+      isOpen: () => open,
+      open: openPanel,
+      close: closePanel,
+      setLanguage: labels,
+    };
+  })();
+  window.friendPersonas = personas;
 
   // --- живая иконка трея (оболочка Tauri) ----------------------------------
   //
@@ -1534,6 +1670,7 @@
       if (chat.setLanguage) chat.setLanguage();
       if (menu.setLanguage) menu.setLanguage();
       if (window.friendMemory) window.friendMemory.setLanguage();
+      if (window.friendPersonas) window.friendPersonas.setLanguage();
     }
     // Синхрон сохранённого языка (этап 13): язык в конфиге сервера мог
     // не совпасть с прошлым выбором человека в меню — выбор человека
