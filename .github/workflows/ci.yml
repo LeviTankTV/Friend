@@ -48,7 +48,9 @@ jobs:
   linux-live:
     name: Linux — живые проверки помощников (X11 + PulseAudio)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 минут обрезали job на focuswatch-шаге (проглон 10m16s): xvfb-блок
+    # с компиляцией focusdbg внутри растягивается за лимит. 15 — с запасом.
+    timeout-minutes: 15
     # Информативная: на образах раннера 20261012+ focuswatch под openbox не
     # видит активного окна (ни строки в файл за 8 с) — проверки не были
     # зелёными ни на одном прогоне, см. диагностику xprop в шаге ниже.
@@ -72,6 +74,9 @@ jobs:
           cd server
           go build -o ../bin/focuswatch ./cmd/focuswatch
           go build -o ../bin/soundwatch ./cmd/soundwatch
+          # focusdbg — бинарём: go run внутри xvfb-блока компилирует модуль
+          # на глазах у таймера шага (прогон 40597953655: блок висел 9,5 мин).
+          go build -o ../bin/focusdbg ./cmd/focusdbg
       # Живая проверка этапа 8а: чистый Go-протокол X11 видит настоящее
       # активное окно (запускаем xterm под xvfb и ждём его имя в строках).
       - name: focuswatch — X11 видит активное окно (xterm)
@@ -90,7 +95,9 @@ jobs:
             echo "--- окна по мнению wmctrl/xprop -clients ---"
             xprop -clients 2>&1 | head -5 || true
             # Диагностика цепочки x11: какое звено вернуло пустоту.
-            (cd server && go run ./cmd/focusdbg) || true
+            # Бинарь + timeout: внутри xvfb-блока ни один диагност не имеет
+            # права висеть дольше минуты (компиляция уже сделана выше).
+            timeout 120 ./bin/focusdbg || true
             # stdin-сторож помощника выходит при закрытом stdin (на раннере
             # шаги идут без stdin) — держим трубу открытой на весь замер.
             sleep 12 | timeout 8 ./bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
@@ -144,9 +151,26 @@ jobs:
           sudo apt-get update
           # Electron'у нужны общие библиотеки рабочего стола; без них процесс
           # умирает молча до первой строки лога. xfonts-base — шрифт xterm.
-          sudo apt-get install -y --no-install-recommends xvfb xterm xfonts-base \
+          # openbox — шаг самопроверки запускает WM фоном; без пакета строка
+          # `openbox &` даёт «command not found» и тесты посадки/удержания
+          # падают на null (нет цели под окном).
+          sudo apt-get install -y --no-install-recommends xvfb xterm xfonts-base openbox \
+            pulseaudio pulseaudio-utils python3 python3-pip \
             libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 libxtst6 \
             libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3
+      - name: Голосовые компоненты (edge-tts, faster-whisper)
+        # Самопроверка проверяет озвучку и голосовой ввод; сервер честно
+        # предупреждает об отсутствии каждого. Ставим то, что просит лог:
+        # pip + модель systran/faster-whisper-base в тот же путь, который
+        # читает server (проверка по model.bin). PEP 668 на 24.04 раннере.
+        run: |
+          pip3 install --break-system-packages edge-tts faster-whisper
+          mkdir -p "$HOME/.config/Friend/stt-model/faster-whisper-base"
+          python3 - <<'EOF'
+          from huggingface_hub import snapshot_download
+          snapshot_download("systran/faster-whisper-base",
+                            local_dir="/home/runner/.config/Friend/stt-model/faster-whisper-base")
+          EOF
       - name: Собираем сервер и помощников
         run: |
           cd server
@@ -157,8 +181,17 @@ jobs:
         run: cd desktop && npm install
       # --no-sandbox обязателен: на раннере electron живёт под root, и без
       # флага Chromium отказывается стартовать.
+      # mkdir под ~/.config/Friend: sqlite не создаёт memory.db в несуществующей
+      # папке («unable to open database file (14)» → тест памяти краснеет).
+      # pulseaudio --start: тесты озвучки/голоса и soundwatch читают сокет
+      # $XDG_RUNTIME_DIR/pulse/native; env живёт в пределах одного шага.
       - name: Самопроверка
-        run: cd desktop && xvfb-run -a --server-args="-screen 0 1280x1024x24" bash -c 'openbox & sleep 1; npx electron . --selftest --no-sandbox'
+        run: |
+          mkdir -p "$HOME/.config/Friend"
+          export XDG_RUNTIME_DIR=/tmp/xdg-runtime
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          pulseaudio --start --exit-idle-time=-1 || true
+          cd desktop && xvfb-run -a --server-args="-screen 0 1280x1024x24" bash -c 'openbox & sleep 1; npx electron . --selftest --no-sandbox'
 
   # Сборка установщиков на всех трёх ОСях (electron-builder). На main —
   # артефакты, чтобы видеть живость сборки; на теге v* — ещё и в черновик
