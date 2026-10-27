@@ -89,6 +89,8 @@ jobs:
             xprop -root _NET_ACTIVE_WINDOW 2>&1 || true
             echo "--- окна по мнению wmctrl/xprop -clients ---"
             xprop -clients 2>&1 | head -5 || true
+            # Диагностика цепочки x11: какое звено вернуло пустоту.
+            (cd server && go run ./cmd/focusdbg) || true
             # stdin-сторож помощника выходит при закрытом stdin (на раннере
             # шаги идут без stdin) — держим трубу открытой на весь замер.
             sleep 12 | timeout 8 ./bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
@@ -96,8 +98,6 @@ jobs:
           '
           echo "--- строки помощника ---"
           cat /tmp/focus-lines.txt
-          # Диагностика цепочки x11: какое звено вернуло пустоту.
-          (cd server && go run ./cmd/focusdbg) || true
           grep -q xterm /tmp/focus-lines.txt
       # Живая проверка этапа 8а: нативный протокол PulseAudio читает
       # монитор дефолтного sink — играем синус в null-sink и требуем
