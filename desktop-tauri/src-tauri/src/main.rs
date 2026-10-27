@@ -11,7 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -27,6 +27,12 @@ const SERVER_ADDR: &str = "127.0.0.1:8787";
 /// с кодом 0/1. Page-часть (31 пункт) — в Electron-самопроверке.
 fn selftest() -> bool {
     std::env::args().any(|a| a == "--selftest")
+}
+
+/// Режим демо (--demo): страница играет сцены и шлёт кадры, оболочка
+/// собирает docs/mira-hero.gif и выходит с кодом 0/1.
+fn demo() -> bool {
+    std::env::args().any(|a| a == "--demo")
 }
 // Сколько молчания страницы = поломка отрисовки (как BEAT_TIMEOUT у Электрона).
 const BEAT_TIMEOUT_MS: u128 = 9000;
@@ -69,6 +75,9 @@ struct Shell {
     settings_path: PathBuf,
     bin_dir: PathBuf,
     web_dir: PathBuf,
+    // Демо (--demo): RGBA-кадры со страницы (js/demo.js композитит, оболочка
+    // кодирует GIF — capturePage в Tauri нет).
+    demo: Mutex<Vec<(u32, u32, Vec<u8>)>>,
 }
 
 impl Shell {
@@ -519,6 +528,58 @@ fn set_tray_icon(app: AppHandle, rgba: Vec<u8>, width: u32, height: u32) -> Resu
         .map_err(|e| e.to_string())
 }
 
+// --- демо (--demo) ---------------------------------------------------------
+
+#[tauri::command]
+fn demo_frame(shell: State<Shell>, b64: String, width: u32, height: u32) {
+    use base64::Engine as _;
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&b64) else { return };
+    if bytes.len() != (width as usize) * (height as usize) * 4 {
+        return; // кадр не по размеру — пропускаем (как у Электрона)
+    }
+    shell.demo.lock().unwrap().push((width, height, bytes));
+}
+
+#[tauri::command]
+fn demo_done(app: AppHandle, shell: State<Shell>, ok: bool) {
+    let frames = shell.demo.lock().unwrap().clone();
+    let out = demo_gif_path();
+    let mut ok = ok;
+    match write_gif(&frames, &out) {
+        Ok(()) => println!("[friend] demo: GIF готов — {} (кадров {})", out.display(), frames.len()),
+        Err(e) => {
+            ok = false;
+            println!("[friend] demo: GIF не собрался ({}); кадров {}", e, frames.len());
+        }
+    }
+    app.exit(if ok { 0 } else { 1 });
+}
+
+// Демо — инструмент разработчика: файл пишется в docs репозитория
+// (путь компиляции; в собранном приложении демо не запускается).
+fn demo_gif_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/mira-hero.gif")
+}
+
+fn write_gif(frames: &[(u32, u32, Vec<u8>)], out: &Path) -> Result<(), String> {
+    use std::io::BufWriter;
+    let Some((w, h, _)) = frames.first() else {
+        return Err("кадров нет".into());
+    };
+    let file = std::fs::File::create(out).map_err(|e| e.to_string())?;
+    let mut enc = gif::Encoder::new(BufWriter::new(file), *w as u16, *h as u16, &[])
+        .map_err(|e| e.to_string())?;
+    enc.set_repeat(gif::Repeat::Infinite).map_err(|e| e.to_string())?;
+    for (w, h, rgba) in frames {
+        let mut pixels = rgba.clone();
+        let mut frame = gif::Frame::from_rgba_speed(*w as u16, *h as u16, &mut pixels, 10);
+        frame.delay = 16; // сотые доли секунды: 160 мс
+        enc.write_frame(&frame).map_err(|e| e.to_string())?;
+    }
+    drop(enc);
+    Ok(())
+}
+
 /// Показать/спрятать окно (трей: пункт меню и двойной клик).
 fn toggle_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -543,7 +604,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             move_by, set_position, get_position, set_bounds, set_size, always_on_top,
             work_area, focus, quit, beat, autostart, dance, save_settings, get_settings,
-            replay_focus, set_tray_icon,
+            replay_focus, set_tray_icon, demo_frame, demo_done,
         ])
         .on_window_event(|window, event| {
             // Закрытие окна — прячем в трей: персонаж живёт в системе, как у
@@ -609,6 +670,7 @@ fn main() {
                 settings_path: settings.clone(),
                 bin_dir,
                 web_dir,
+                demo: Mutex::new(Vec::new()),
             });
 
             if !wait_healthz(Duration::from_secs(10)) {
@@ -619,11 +681,13 @@ fn main() {
             // Адрес сервера — тоже: страница живёт в ассет-протоколе оболочки
             // (tauri://localhost), а сервер — на 127.0.0.1:8787; мост собирает
             // из этого абсолютные URL (ws, /stt, /memory, /tts, /sprites).
+            // Демо (--demo) — флаг для js/demo.js: сцены и кадры там.
             let settings_json = std::fs::read_to_string(&settings).unwrap_or_else(|_| "null".into());
             let init_script = format!(
-                "window.__FRIEND_SERVER__ = 'http://{}'; window.__FRIEND_SETTINGS__ = {};",
+                "window.__FRIEND_SERVER__ = 'http://{}'; window.__FRIEND_SETTINGS__ = {};{}",
                 SERVER_ADDR,
-                if settings_json.trim().is_empty() { "null".into() } else { settings_json }
+                if settings_json.trim().is_empty() { "null".into() } else { settings_json },
+                if demo() { " window.__FRIEND_DEMO__ = '1';" } else { "" },
             );
 
             // Страница — из ассетов оболочки (build.frontendDist → ../web):
@@ -642,34 +706,42 @@ fn main() {
                 .always_on_top(true)
                 .initialization_script(&init_script)
                 .build()?;
+            // Демо: окно уезжает за экран — тёмный холст записи не должен висеть
+            // на рабочем столе; страницу рисует сама, окно ей нужно только живым.
+            // Напрямую через set_position: мостовой зажим за край не пускает.
+            if demo() {
+                let _ = win.set_position(tauri::Position::Physical(
+                    tauri::PhysicalPosition::new(-2500, 100),
+                ));
+            }
             let _ = win.set_focus();
 
             // Трей: «показать / скрыть» и «выход», двойной клик — показать.
-            // Иконка пока статичная (спрайт-лицо); живая иконка из capturePage —
-            // шаг 5+ аудита (в Tauri нужен COM CapturePreview).
-            let show_i = tauri::menu::MenuItem::with_id(app, "show", "показать / скрыть", true, None::<&str>)?;
-            let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "выход", true, None::<&str>)?;
-            let tray_menu = tauri::menu::Menu::with_items(app, &[&show_i, &quit_i])?;
-            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
-            let _tray = tauri::tray::TrayIconBuilder::with_id("main")
-                .icon(icon)
-                .tooltip("Мира — двойной клик: показать")
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, ev| match ev.id().as_ref() {
-                    "show" => toggle_window(app),
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, ev| {
-                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = ev {
-                        toggle_window(tray.app_handle());
-                    }
-                })
-                .build(app)?;
+            // Живая иконка приходит СО СТРАНИЦЫ (set_tray_icon); статичный
+            // спрайт-лицо стоит до первого кадра. В демо трей не нужен.
+            if !demo() {
+                let show_i = tauri::menu::MenuItem::with_id(app, "show", "показать / скрыть", true, None::<&str>)?;
+                let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "выход", true, None::<&str>)?;
+                let tray_menu = tauri::menu::Menu::with_items(app, &[&show_i, &quit_i])?;
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+                let _tray = tauri::tray::TrayIconBuilder::with_id("main")
+                    .icon(icon)
+                    .tooltip("Мира — двойной клик: показать")
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, ev| match ev.id().as_ref() {
+                        "show" => toggle_window(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, ev| {
+                        if let tauri::tray::TrayIconEvent::DoubleClick { .. } = ev {
+                            toggle_window(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
 
-            // Помощник активного окна: строки — события focus:info странице.
-            {
+                // Помощник активного окна: строки — события focus:info странице.
                 let shell: State<Shell> = app.state();
                 spawn_focus(&handle, &shell);
             }

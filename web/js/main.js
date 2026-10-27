@@ -73,6 +73,10 @@
     antialias: true,
     resolution: Math.min(2, window.devicePixelRatio || 1),
     autoDensity: true,
+    // Буфер должен ЖИТЬ между кадрами: живая иконка трея и демо-кадры читают
+    // канвас через drawImage вне rAF-тика — без этого флага буфер очищается
+    // после композитинга, и снаружи канвас выглядит пустым (находка демо).
+    preserveDrawingBuffer: true,
     width: 1,
     height: 1,
   });

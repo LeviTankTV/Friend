@@ -208,6 +208,10 @@ window.FriendBridge = (function () {
     // Tauri нет) и присылает 16×16 RGBA. Ветке Electron не нужна — там
     // оболочка снимает окно сама.
     api.setTrayIcon = (rgba, w, h) => inv('set_tray_icon', { rgba: rgba, width: w, height: h });
+    // Демо (--demo): кадры компонует страница (js/demo.js) и шлёт оболочке
+    // по одному; оболочка кодирует GIF (крейт gif) и пишет docs/mira-hero.gif.
+    api.demoFrame = (b64, w, h) => inv('demo_frame', { b64: b64, width: w, height: h });
+    api.demoDone = (ok) => inv('demo_done', { ok: !!ok });
     // Пульс кадров для сторожа оболочки (BEAT_TIMEOUT): страница зовёт на
     // каждом кадре — команда копеечная, но сторож обязан видеть жизнь.
     api.beat = () => { inv('beat'); };
