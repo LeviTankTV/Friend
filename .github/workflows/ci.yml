@@ -40,9 +40,10 @@ jobs:
         run: go test ./...
       - name: Сборка сервера и помощников
         run: |
-          go build -o ../bin/companion ./cmd/companion
-          go build -o ../bin/focuswatch ./cmd/focuswatch
-          go build -o ../bin/soundwatch ./cmd/soundwatch
+          EXT=""; if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+          go build -o ../bin/companion$EXT ./cmd/companion
+          go build -o ../bin/focuswatch$EXT ./cmd/focuswatch
+          go build -o ../bin/soundwatch$EXT ./cmd/soundwatch
 
   linux-live:
     name: Linux — живые проверки помощников (X11 + PulseAudio)
@@ -245,9 +246,10 @@ jobs:
       - name: Сборка сервера и помощников (для resources)
         run: |
           cd server
-          go build -o ../bin/companion ./cmd/companion
-          go build -o ../bin/focuswatch ./cmd/focuswatch
-          go build -o ../bin/soundwatch ./cmd/soundwatch
+          EXT=""; if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+          go build -o ../bin/companion$EXT ./cmd/companion
+          go build -o ../bin/focuswatch$EXT ./cmd/focuswatch
+          go build -o ../bin/soundwatch$EXT ./cmd/soundwatch
       - name: npm ci
         run: cd desktop-tauri && npm ci
       - name: cargo build (без инсталляторов)
