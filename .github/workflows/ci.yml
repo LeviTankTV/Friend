@@ -89,7 +89,9 @@ jobs:
             xprop -root _NET_ACTIVE_WINDOW 2>&1 || true
             echo "--- окна по мнению wmctrl/xprop -clients ---"
             xprop -clients 2>&1 | head -5 || true
-            timeout 8 ./bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
+            # stdin-сторож помощника выходит при закрытом stdin (на раннере
+            # шаги идут без stdin) — держим трубу открытой на весь замер.
+            sleep 12 | timeout 8 ./bin/focuswatch -interval 1s | head -n 5 > /tmp/focus-lines.txt
             kill $XPID $WMPID 2>/dev/null || true
           '
           echo "--- строки помощника ---"
@@ -112,7 +114,8 @@ jobs:
           w.close()
           EOF
           paplay /tmp/sine.wav &
-          timeout 8 ./bin/soundwatch -interval 300ms | head -n 10 > /tmp/sound-lines.txt
+          # Тот же stdin-сторож: труба должна жить весь замер.
+          sleep 12 | timeout 8 ./bin/soundwatch -interval 300ms | head -n 10 > /tmp/sound-lines.txt
           echo "--- строки помощника ---"
           cat /tmp/sound-lines.txt
           grep -Eq '"level":0\.[0-9]{3,}' /tmp/sound-lines.txt
