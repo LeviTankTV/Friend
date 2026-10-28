@@ -4,7 +4,13 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"time"
 )
+
+// readTimeout — сколько ждём ОДИН пакет от локального X-сервера. Без дедлайна
+// зависший X (CI-xvfb) превращал io.ReadFull в вечное ожидание: помощник не
+// печатал ни строки и умирал только от внешнего timeout.
+const readTimeout = 10 * time.Second
 
 // Клиентские константы протокола (Xproto, глава «Packet Types»).
 // Порядок байт полей пакетов — little-endian (byteOrder в рукопожатии).
@@ -68,6 +74,8 @@ func (c *Client) request(opcode byte, data []byte) {
 // grabbed-клавиатурой) сдвигает поток на 8 байт, и слепое чтение «по 32»
 // навечно уходит в io.ReadFull.
 func (c *Client) readFull() (rt byte, header []byte, seq uint16, extra []byte, err error) {
+	c.conn.SetReadDeadline(time.Now().Add(readTimeout))
+	defer c.conn.SetReadDeadline(time.Time{})
 	t := make([]byte, 1)
 	if _, err = io.ReadFull(c.conn, t); err != nil {
 		return 0, nil, 0, nil, err

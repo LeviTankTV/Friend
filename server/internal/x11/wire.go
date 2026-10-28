@@ -17,7 +17,19 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// trace — пошаговая диагностика рукопожатия в stderr. На CI-xvfb помощник
+// зависал молча (ни строки вывода за 120 секунд), и без шагов с таймингом
+// было невозможно сказать, НА КАКОМ шаге обрывается handshake: dial,
+// запись запроса, первый байт ответа или хвост setup-ответа.
+var traceT0 = time.Now()
+
+func trace(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "x11 %5dms: "+format+"\n",
+		append([]any{time.Since(traceT0).Milliseconds()}, args...)...)
+}
 
 // Display — разбор переменной DISPLAY. Понимаем локальный X-сервер
 // («:0», «:10.0» — unix-сокет /tmp/.X11-unix/XN) и localhost по TCP
@@ -72,9 +84,9 @@ type Cookie struct {
 // family-коды Xauthority (X.h). FamilyLocal (256) — «локальный пир»,
 // аутентификация по пир-контентам сокета, cookie не нужен.
 const (
-	familyWildMask         = 0
-	familyLocal            = 256
-	familyNET              = 19
+	familyWildMask          = 0
+	familyLocal             = 256
+	familyNET               = 19
 	familyServerInterpreted = 11
 )
 
@@ -146,20 +158,32 @@ func Connect() (*Client, error) {
 	}
 	var conn net.Conn
 	if d.TCP != "" {
-		conn, err = net.Dial("tcp", d.TCP)
+		conn, err = net.DialTimeout("tcp", d.TCP, dialTimeout)
 	} else {
-		conn, err = net.Dial("unix", d.Socket)
+		conn, err = net.DialTimeout("unix", d.Socket, dialTimeout)
 	}
 	if err != nil {
+		trace("dial %s: %v", displayHint(d), err)
 		return nil, fmt.Errorf("X-сервер %q недоступен: %w", displayHint(d), err)
 	}
+	trace("dial %s ok", displayHint(d))
 	cl := &Client{conn: conn}
 	if err := cl.handshake(d, xauthCookie()); err != nil {
 		conn.Close()
 		return nil, err
 	}
+	// Рукопожатие окончено — постоянный дедлайн снимаем: в steady-state
+	// каждый последующий read получает свой дедлайн внутри readFull.
+	conn.SetReadDeadline(time.Time{})
 	return cl, nil
 }
+
+// dialTimeout и handshakeTimeout — границы, за которые локальный X-сервер
+// обязан ответить; их отсутствие превращало CI в вечное ожидание.
+const (
+	dialTimeout      = 5 * time.Second
+	handshakeTimeout = 20 * time.Second
+)
 
 func displayHint(d Display) string {
 	if d.TCP != "" {
@@ -193,6 +217,7 @@ const byteOrder = 12 // LittleEndian — как в X.h: 12 = «little endian byt
 // handshake — рукопожатие X11: порядок байт, версии протокола, имя метода
 // аутентификации и данные. Дальше читаем ответ (1 байт успеха + setup-заголовок).
 func (c *Client) handshake(d Display, ck Cookie) error {
+	c.conn.SetReadDeadline(time.Now().Add(handshakeTimeout))
 	major := uint16(11)
 	minor := uint16(0)
 	name := []byte("MIT-MAGIC-COOKIE-1")
@@ -216,13 +241,17 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 	req = binary.BigEndian.AppendUint16(req, 0) // extra-length
 	req = append(req, pad(name)...)
 	req = append(req, pad(data)...)
+	trace("auth: method=%q cookie=%d bytes", name, len(data))
 	if _, err := c.conn.Write(req); err != nil {
 		return fmt.Errorf("X-рукопожатие: запись: %w", err)
 	}
+	trace("request sent (%d bytes)", len(req))
 	first := make([]byte, 1)
 	if _, err := io.ReadFull(c.conn, first); err != nil {
+		trace("no first byte: %v", err)
 		return fmt.Errorf("X-рукопожатие: чтение: %w", err)
 	}
+	trace("first byte = %d (0 failed / 1 success / 2 authenticate)", first[0])
 	switch first[0] {
 	case 0: // Failed
 		var h [8]byte
@@ -250,22 +279,30 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 		numScreens := int(binary.LittleEndian.Uint16(hdr[8:10]))
 		vendorLen := int(binary.LittleEndian.Uint16(hdr[10:12]))
 		numFormats := int(hdr[16])
+		trace("setup header: release=%d rid_base=%x screens=%d vendor=%d req=%d formats=%d",
+			binary.LittleEndian.Uint16(hdr[0:2]), ridBase, numScreens, vendorLen,
+			binary.LittleEndian.Uint16(hdr[12:14]), numFormats)
 		pad4 := func(n int) int { return (n + 3) & ^3 }
 		skip := make([]byte, 16+pad4(vendorLen)+numScreens*32+numFormats*8)
 		if _, err := io.ReadFull(c.conn, skip); err != nil {
+			trace("setup data (%d bytes): %v", len(skip), err)
 			return fmt.Errorf("X-рукопожатие: setup-данные: %w", err)
 		}
+		trace("setup data skipped (%d bytes)", len(skip))
 		nl := make([]byte, 2)
 		for i := 0; i < numScreens; i++ {
 			if _, err := io.ReadFull(c.conn, nl); err != nil {
+				trace("root name %d: %v", i, err)
 				return fmt.Errorf("X-рукопожатие: имя корня: %w", err)
 			}
 			n := int(binary.LittleEndian.Uint16(nl))
 			name := make([]byte, pad4(n))
 			if _, err := io.ReadFull(c.conn, name); err != nil {
+				trace("root name %d (%d bytes): %v", i, n, err)
 				return fmt.Errorf("X-рукопожатие: имя корня: %w", err)
 			}
 		}
+		trace("setup done: root=%x", c.rootID)
 		return nil
 	case 2: // Authenticate
 		return errors.New("X-сервер просит аутентификацию, которой у нас нет (нужен XAUTHORITY)")

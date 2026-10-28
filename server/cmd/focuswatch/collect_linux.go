@@ -45,12 +45,17 @@ func collect(d time.Duration) int {
 	ticker := time.NewTicker(d)
 	defer ticker.Stop()
 
+	// Диагностика в stderr (stdout — только JSON-строки): на CI-xvfb
+	// помощник молчал 120 секунд, и без этих строк было не понять, где
+	// именно обрывается цепочка.
+	fmt.Fprintf(os.Stderr, "focuswatch: DISPLAY=%q XAUTHORITY=%q\n", os.Getenv("DISPLAY"), os.Getenv("XAUTHORITY"))
 	cl, err := x11.Connect()
 	if err != nil {
 		// Одна строка с причиной — и выход: сервер живёт без понимания окна.
 		fmt.Println(fmt.Sprintf(`{"error":"focuswatch: %s"}`, jsonEscape(err.Error())))
 		return 0
 	}
+	fmt.Fprintf(os.Stderr, "focuswatch: x11 connect ok, root=%x\n", cl.Root())
 	defer cl.Close()
 
 	for {
@@ -76,7 +81,12 @@ func collect(d time.Duration) int {
 // (рабочий стол без фокуса, экран блокировки).
 func current(cl *x11.Client) sample {
 	w, err := cl.ActiveWindow()
-	if err != nil || w == 0 {
+	if err != nil {
+		// Причина видна в логе: без неё пустой цикл неотличим от зависшего.
+		fmt.Fprintf(os.Stderr, "focuswatch: ActiveWindow: %v\n", err)
+		return sample{}
+	}
+	if w == 0 {
 		return sample{}
 	}
 	pid := cl.WindowPID(w)
