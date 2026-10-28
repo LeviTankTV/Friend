@@ -266,3 +266,30 @@ func TestParseXauthorityFindsCookie(t *testing.T) {
 		t.Fatalf("cookie = %x, ждали 16×AB", c.Data)
 	}
 }
+
+// Сканирование по строке: файл в формате u32-длин (структурный u16-разбор
+// даёт «обрыв») — cookie всё равно находится.
+func TestXauthScanU32File(t *testing.T) {
+	str := func(v string) []byte {
+		b := binary.LittleEndian.AppendUint32(nil, uint32(len(v)))
+		return append(b, []byte(v)...)
+	}
+	var b []byte
+	b = binary.LittleEndian.AppendUint16(b, 256)
+	b = append(b, str("runner")...)
+	b = append(b, str("99")...)
+	b = append(b, str("MIT-MAGIC-COOKIE-1")...)
+	data := make([]byte, 16)
+	for i := range data {
+		data[i] = 0xCD
+	}
+	b = append(b, str(string(data))...)
+	d, _ := ParseDisplay(":99")
+	c, ok := xauthScan(b, d)
+	if !ok {
+		t.Fatal("скан не нашёл cookie в u32-файле")
+	}
+	if len(c.Data) != 16 || c.Data[0] != 0xCD {
+		t.Fatalf("cookie = %x", c.Data)
+	}
+}

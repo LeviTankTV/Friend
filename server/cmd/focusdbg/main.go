@@ -22,6 +22,16 @@ func main() {
 		fmt.Printf("+%5dms %s\n", time.Since(t0).Milliseconds(), fmt.Sprint(a...))
 	}
 	log("DISPLAY=", os.Getenv("DISPLAY"), "XAUTHORITY=", os.Getenv("XAUTHORITY"))
+	// Зонд формата Xauthority: разбор в Go дал «обрыв» на файле от xvfb-run,
+	// сырые байты первого рекорда покажут настоящий формат длин строк.
+	if p := os.Getenv("XAUTHORITY"); p != "" {
+		if raw, err := os.ReadFile(p); err != nil {
+			log("xauth dump: ОШИБКА:", err)
+		} else {
+			n := min(len(raw), 96)
+			log("xauth dump: size=", len(raw), " head=", fmt.Sprintf("%x", raw[:n]))
+		}
+	}
 	cl, err := x11.Connect()
 	if err != nil {
 		log("connect: ОШИБКА:", err)

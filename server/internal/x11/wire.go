@@ -9,6 +9,7 @@
 package x11
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -153,6 +154,70 @@ func ParseXauthority(path string, display Display) (Cookie, error) {
 	return Cookie{}, errors.New("Xauthority: cookie для этого дисплея не найден")
 }
 
+// xauthScan — запасной поиск cookie по байтам файла: находим строку
+// «MIT-MAGIC-COOKIE-1», проверяем, что перед ней длина строки (у16 ИЛИ у32 —
+// ровно ей равная), а за ней — данные с длиной той же ширины, и что номер
+// дисплея в записи совпадает. Формат netstrings в Xauthority на разных
+// сборках xauth разнится (находка CI-xvfb: и у16-парсер дал «обрыв»), а
+// судьбу помощника рядом с экраном эти тонкости решать не должны.
+func xauthScan(raw []byte, display Display) (Cookie, bool) {
+	needle := []byte("MIT-MAGIC-COOKIE-1")
+	want := strconv.Itoa(display.Number)
+	for off := 0; off+len(needle) <= len(raw); {
+		j := bytes.Index(raw[off:], needle)
+		if j < 0 {
+			break
+		}
+		k := off + j // начало строки имени
+		width := 0
+		if k >= 2 && binary.LittleEndian.Uint16(raw[k-2:]) == uint16(len(needle)) {
+			width = 2
+		} else if k >= 4 && binary.LittleEndian.Uint32(raw[k-4:]) == uint32(len(needle)) {
+			width = 4
+		}
+		if width == 0 {
+			off = k + 1
+			continue
+		}
+		// Номер дисплея: строка перед именем (свой префикс длины той же ширины).
+		seg := raw[:k-width] // до префикса длины имени
+		if len(seg) < 2*width+len(want) || string(seg[len(seg)-len(want):]) != want {
+			off = k + 1
+			continue
+		}
+		p := len(seg) - len(want)
+		if p < width {
+			off = k + 1
+			continue
+		}
+		// Префикс длины номера — ПЕРЕД строкой номера.
+		n := int(binary.LittleEndian.Uint16(raw[p-width:]))
+		if width == 4 {
+			n = int(binary.LittleEndian.Uint32(raw[p-width:]))
+		}
+		if n != len(want) {
+			off = k + 1
+			continue
+		}
+		// Данные сразу за именем: префикс длины той же ширины.
+		dl := k + len(needle)
+		dlen := 0
+		if dl+width <= len(raw) {
+			dlen = int(binary.LittleEndian.Uint16(raw[dl:]))
+			if width == 4 {
+				dlen = int(binary.LittleEndian.Uint32(raw[dl:]))
+			}
+		}
+		if dlen <= 0 || dlen > 128 || dl+width+dlen > len(raw) {
+			off = k + 1
+			continue
+		}
+		data := append([]byte(nil), raw[dl+width:dl+width+dlen]...)
+		return Cookie{Name: string(needle), Data: data}, true
+	}
+	return Cookie{}, false
+}
+
 // Connect открывает соединение с локальным X-сервером по DISPLAY и
 // проходит рукопожатие (с cookie из XAUTHORITY, если он есть).
 func Connect() (*Client, error) {
@@ -209,13 +274,22 @@ func xauthCookie() Cookie {
 	if err != nil || path == "" {
 		return Cookie{}
 	}
-	c, err := ParseXauthority(path, d)
-	if err != nil {
-		trace("xauth %s: %v", path, err)
+	raw, rerr := os.ReadFile(path)
+	if rerr != nil {
+		trace("xauth %s: %v", path, rerr)
 		return Cookie{}
 	}
-	trace("xauth %s: cookie «%s» %d bytes", path, c.Name, len(c.Data))
-	return c
+	c, err := ParseXauthority(path, d)
+	if err == nil {
+		trace("xauth %s: cookie «%s» %d bytes (структура)", path, c.Name, len(c.Data))
+		return c
+	}
+	if c, ok := xauthScan(raw, d); ok {
+		trace("xauth %s: cookie «%s» %d bytes (поиск по строке)", path, c.Name, len(c.Data))
+		return c
+	}
+	trace("xauth %s: %v (и структурный разбор, и поиск не нашли)", path, err)
+	return Cookie{}
 }
 
 const byteOrder = 12 // LittleEndian — как в X.h: 12 = «little endian byte order»
