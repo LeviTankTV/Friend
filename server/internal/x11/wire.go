@@ -310,22 +310,29 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 	if len(data) == 0 {
 		name = []byte{}
 	}
-	// padding до 4 байт
-	pad := func(b []byte) []byte {
+	// Layout запроса по Xproto 9.2 Connection Setup Request:
+	// byte-order(1) + pad(1) + major(2) + minor(2) + bytes-to-follow(2),
+	// затем блоки имени и данных метода аутентификации: u16-длина (big-
+	// endian) + строка + нули до кратности 4. Находка CI (EOF сразу после
+	// записи):layout «11-байтный заголовок с длинами name/data» сервер
+	// читал как bytes-to-follow=18 — аутентификация ломалась, сервер
+	// закрывал соединение.
+	blocks := func(s []byte) []byte {
+		b := binary.BigEndian.AppendUint16(nil, uint16(len(s)))
+		b = append(b, s...)
 		for len(b)%4 != 0 {
 			b = append(b, 0)
 		}
 		return b
 	}
-	req := make([]byte, 0, 12+len(pad(name))+len(pad(data)))
-	req = append(req, byteOrder)
+	nb, db := blocks(name), blocks(data)
+	req := make([]byte, 0, 8+len(nb)+len(db))
+	req = append(req, byteOrder, 0)
 	req = binary.BigEndian.AppendUint16(req, major)
 	req = binary.BigEndian.AppendUint16(req, minor)
-	req = binary.BigEndian.AppendUint16(req, uint16(len(name)))
-	req = binary.BigEndian.AppendUint16(req, uint16(len(data)))
-	req = binary.BigEndian.AppendUint16(req, 0) // extra-length
-	req = append(req, pad(name)...)
-	req = append(req, pad(data)...)
+	req = binary.BigEndian.AppendUint16(req, uint16(len(nb)+len(db))) // bytes-to-follow
+	req = append(req, nb...)
+	req = append(req, db...)
 	trace("auth: method=%q cookie=%d bytes", name, len(data))
 	if _, err := c.conn.Write(req); err != nil {
 		return fmt.Errorf("X-рукопожатие: запись: %w", err)

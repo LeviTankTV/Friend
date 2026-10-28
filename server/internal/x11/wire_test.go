@@ -115,18 +115,28 @@ func setupResponse(ridBase uint32) []byte {
 	return b
 }
 
-// readHandshakeRequest читает запрос рукопожатия с net.Pipe целиком.
+// readHandshakeRequest читает запрос рукопожатия по Xproto 9.2: заголовок
+// 8 байт (order, pad, major, minor, bytes-to-follow) + два блока
+// аутентификации (u16 длина + строка + нули до кратности 4).
 // t не передаём: вызывается из серверного goroutine и при ошибке просто
 // обрывает чтение (клиентская сторона получит её сама и покажет).
 func readHandshakeRequest(s net.Conn) {
-	h := make([]byte, 11)
+	h := make([]byte, 10)
 	if _, err := io.ReadFull(s, h); err != nil {
 		return
 	}
-	nl := int(binary.LittleEndian.Uint16(h[4:6]))
-	dl := int(binary.LittleEndian.Uint16(h[6:8]))
 	pad := func(n int) int { return (n + 3) & ^3 }
-	skip := make([]byte, pad(nl)+pad(dl))
+	nl := int(binary.BigEndian.Uint16(h[8:10]))
+	skip := make([]byte, pad(nl+2)-2)
+	if _, err := io.ReadFull(s, skip); err != nil {
+		return
+	}
+	dl2 := make([]byte, 2)
+	if _, err := io.ReadFull(s, dl2); err != nil {
+		return
+	}
+	dl := int(binary.BigEndian.Uint16(dl2))
+	skip = make([]byte, pad(dl+2)-2)
 	io.ReadFull(s, skip)
 }
 
