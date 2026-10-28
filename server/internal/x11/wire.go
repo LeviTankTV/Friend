@@ -316,9 +316,12 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 	// endian) + строка + нули до кратности 4. Находка CI (EOF сразу после
 	// записи):layout «11-байтный заголовок с длинами name/data» сервер
 	// читал как bytes-to-follow=18 — аутентификация ломалась, сервер
-	// закрывал соединение.
+	// закрывал соединение. ВАЖНО: все целые запроса рукопожатия — в той
+	// байтовой последовательности, которую объявил флаг byteOrder (у нас
+	// 12 = LSBFirst → little-endian). Big-endian длины сервер читает как
+	// bytes-to-follow=10240 и обрывает соединение (EOF на CI-трейсе).
 	blocks := func(s []byte) []byte {
-		b := binary.BigEndian.AppendUint16(nil, uint16(len(s)))
+		b := binary.LittleEndian.AppendUint16(nil, uint16(len(s)))
 		b = append(b, s...)
 		for len(b)%4 != 0 {
 			b = append(b, 0)
@@ -328,9 +331,9 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 	nb, db := blocks(name), blocks(data)
 	req := make([]byte, 0, 8+len(nb)+len(db))
 	req = append(req, byteOrder, 0)
-	req = binary.BigEndian.AppendUint16(req, major)
-	req = binary.BigEndian.AppendUint16(req, minor)
-	req = binary.BigEndian.AppendUint16(req, uint16(len(nb)+len(db))) // bytes-to-follow
+	req = binary.LittleEndian.AppendUint16(req, major)
+	req = binary.LittleEndian.AppendUint16(req, minor)
+	req = binary.LittleEndian.AppendUint16(req, uint16(len(nb)+len(db))) // bytes-to-follow
 	req = append(req, nb...)
 	req = append(req, db...)
 	trace("auth: method=%q cookie=%d bytes", name, len(data))
