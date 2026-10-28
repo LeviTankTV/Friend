@@ -93,31 +93,92 @@ func TestParseXauthoritySkipsOtherDisplay(t *testing.T) {
 	}
 }
 
-// Рукопожатие: запись пакета (порядок байт, версии, длины), ответ Success
-// с setup-данными, отказ — человекочитаемая причина.
+// setupResponse — setup-ответ сервера по спецификации (Xproto, Connection
+// Setup Reply): 18 байт заголовка, resources (2×8), вендор (pad4),
+// SCREEN-записи ×32, FORMATS ×8, имя корня (len u16 + pad4).
+func setupResponse(ridBase uint32) []byte {
+	b := []byte{1} // Success
+	b = binary.LittleEndian.AppendUint16(b, 11)
+	b = binary.LittleEndian.AppendUint32(b, ridBase)
+	b = binary.LittleEndian.AppendUint16(b, 0)   // motion
+	b = binary.LittleEndian.AppendUint16(b, 1)   // numScreens
+	b = binary.LittleEndian.AppendUint16(b, 4)   // vendorLen
+	b = binary.LittleEndian.AppendUint16(b, 65535)
+	b = append(b, 8, 255, 0, 0) // minKC, maxKC, numFormats, pad
+	b = append(b, make([]byte, 16)...)
+	b = append(b, []byte("X11\x00")...)
+	b = append(b, make([]byte, 32)...) // один SCREEN
+	b = binary.LittleEndian.AppendUint16(b, 8)
+	b = append(b, []byte("screen 0")...)
+	return b
+}
+
+// readHandshakeRequest читает запрос рукопожатия с net.Pipe целиком.
+// t не передаём: вызывается из серверного goroutine и при ошибке просто
+// обрывает чтение (клиентская сторона получит её сама и покажет).
+func readHandshakeRequest(s net.Conn) {
+	h := make([]byte, 11)
+	if _, err := io.ReadFull(s, h); err != nil {
+		return
+	}
+	nl := int(binary.LittleEndian.Uint16(h[4:6]))
+	dl := int(binary.LittleEndian.Uint16(h[6:8]))
+	pad := func(n int) int { return (n + 3) & ^3 }
+	skip := make([]byte, pad(nl)+pad(dl))
+	io.ReadFull(s, skip)
+}
+
+// Рукопожатие: success-ответ разбирается ПОЛНОСТЬЮ (root id = rid+0x1ff,
+// setup-байты не оставляются в потоке), отказ — человекочитаемая причина.
 func TestHandshakeSuccessAndFailure(t *testing.T) {
 	c2, s2 := pipe()
+	defer c2.Close()
+	defer s2.Close()
 	cl := &Client{conn: c2}
-		go func() {
-			// net.Pipe синхронный: сначала прочесть запрос рукопожатия
-			// (11-байтный заголовок + имя 20 + cookie 4), затем ответить
-			// Success + setup-заголовок (7 байт: у setup-RESPONSE нет
-			// 32-байтного пакета — он special, сразу после байта успеха).
-			buf := make([]byte, 35)
-			io.ReadFull(s2, buf)
-			s2.Write([]byte{1, 0, 11, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
-		}()
+	go func() {
+		readHandshakeRequest(s2)
+		s2.Write(setupResponse(0x200000))
+		// net.Pipe — синхронный: сначала вычитываем запрос internAtom,
+		// потом досылаем KeymapNotify (24, без seq), событие с чужим seq,
+		// ATOM-ответ на seq=1 (заголовок 32 + extra 4, atom=42).
+		req := make([]byte, 16)
+		s2.Read(req)
+		keymap := make([]byte, 24)
+		keymap[0] = 2
+		s2.Write(keymap)
+		ev := make([]byte, 32)
+		ev[0] = 12
+		binary.LittleEndian.PutUint16(ev[2:4], 99)
+		s2.Write(ev)
+		rep := make([]byte, 32)
+		rep[0] = 1
+		binary.LittleEndian.PutUint16(rep[2:4], 1)
+		binary.LittleEndian.PutUint32(rep[4:8], 0)  // extra-слов нет
+		binary.LittleEndian.PutUint32(rep[8:12], 42) // atom в собственном поле ответа
+		s2.Write(rep)
+	}()
 	d, _ := ParseDisplay(":0")
 	if err := cl.handshake(d, Cookie{Name: "MIT-MAGIC-COOKIE-1", Data: []byte{1, 2, 3, 4}}); err != nil {
 		t.Fatalf("рукопожатие должно пройти: %v", err)
 	}
+	if cl.Root() != 0x200000+0x1ff {
+		t.Fatalf("root id = rid_base + 0x1ff, получили %x", cl.Root())
+	}
+	// InternAtom(«X») уходит seq=1; сервер отдаёт ключмап+чужое событие+ответ.
+	atom, err := cl.internAtom("X")
+	if err != nil {
+		t.Fatalf("internAtom: %v", err)
+	}
+	if atom != 42 {
+		t.Fatalf("atom = %d, ждали 42", atom)
+	}
+
 	c3, s3 := pipe()
+	defer c3.Close()
+	defer s3.Close()
 	cl3 := &Client{conn: c3}
 	go func() {
-		// Failed(0): reason_len=5 «нет X» + padding. Запрос пустого cookie
-		// — 11 байт, читаем их первым.
-		buf := make([]byte, 11)
-		io.ReadFull(s3, buf)
+		readHandshakeRequest(s3)
 		msg := []byte("нет X")
 		p := make([]byte, 8, 16)
 		binary.LittleEndian.PutUint16(p[4:6], uint16(len(msg)))
@@ -127,11 +188,37 @@ func TestHandshakeSuccessAndFailure(t *testing.T) {
 		}
 		s3.Write(append([]byte{0}, p...))
 	}()
-	err := cl3.handshake(d, Cookie{})
+	err = cl3.handshake(d, Cookie{})
 	if err == nil {
 		t.Fatal("отказ обязан передаваться человеку")
 	}
 }
 
-// pipe — сетевой pipe для тестов протокола (net.Pipe).
-func pipe() (net.Conn, net.Conn) { return net.Pipe() }
+// Ключевые проверки протокола: разбор setup-ответа, root id и чтение
+// ответа поверх KeymapNotify/чужих событий — в TestHandshakeSuccessAndFailure.
+// pipe — пара полноценных потоковых сокетов для тестов протокола.
+// net.Pipe НЕ годится: он «сообщение в сообщение» (каждый Write — один
+// Read, без буфера), а X11-клиент читает поток мелкими io.ReadFull —
+// на net.Pipe такой читатель неизбежно зависает.
+func pipe() (net.Conn, net.Conn) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer ln.Close()
+	type res struct {
+		c net.Conn
+		e error
+	}
+	ch := make(chan res, 1)
+	go func() { c, e := ln.Accept(); ch <- res{c, e} }()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		panic(err)
+	}
+	r := <-ch
+	if r.e != nil {
+		panic(r.e)
+	}
+	return c, r.c
+}

@@ -6,16 +6,22 @@ import (
 	"net"
 )
 
-// Клиентские константы протокола (X.h).
+// Клиентские константы протокола (Xproto, глава «Packet Types»).
+// Порядок байт полей пакетов — little-endian (byteOrder в рукопожатии).
 const (
 	opInternAtom  = 19
 	opGetProperty = 20
 	opGetGeometry = 15
 	opQueryExt    = 131
 
-	rtSuccess = 0
-	rtError   = 1
-	rtReply   = 2
+	// Типи пакетов сервера (Xproto «Generic Reply/Error/Event»):
+	//   0 = Error, 1 = Reply, 2 = KeymapNotify (событие 24 байта, без seq),
+	//   3..127 = события (32 байта, seq = номер последнего запроса),
+	//   ≥128 = ответы на SendEvent (мы их не шлём).
+	rtError      = 0
+	rtReply      = 1
+	rtKeymapEv   = 2
+	keymapPacket = 24
 
 	typeAtom = 4 // ATOM (список атомов в 32-битных слотах)
 
@@ -24,8 +30,6 @@ const (
 	PropPID    = "_NET_WM_PID"
 	PropClass  = "WM_CLASS"
 
-	RootWindow = 0x1ff // классический id root-окна: им и пользуемся
-
 	// Имя расширения простоя (MIT-SCREEN-SAVER), чей opcode запрашиваем.
 	extScreenSaver = "MIT-SCREEN-SAVER"
 )
@@ -33,15 +37,21 @@ const (
 // Client — соединение с X-сервером. Протокол блокирующий (запрос → ответ),
 // помощник однопоточен и владеет соединением один.
 type Client struct {
-	conn net.Conn
-	seq  uint16
+	conn   net.Conn
+	seq    uint16
+	rootID uint32 // id root-окна первого экрана (из setup-ответа, как в Xlib)
 }
+
+// Root — id root-окна: Xlib считает его как rid_base + 0x1ff. Хардкод 0x1ff
+// работал только на старых Xvfb с rid_base=0x200; современный Xvfb отдаёт
+// rid_base=0x200000, и запрос к 0x1ff получает BadWindow.
+func (c *Client) Root() uint32 { return c.rootID }
 
 // Close закрывает соединение.
 func (c *Client) Close() error { return c.conn.Close() }
 
 // request пишет пакет запроса: opcode, 0, длина данных в 4-байтных словах,
-// seq. Запрос без ответа (QueryExtension, QueryInfo) уходит именно так.
+// seq.
 func (c *Client) request(opcode byte, data []byte) {
 	c.seq++
 	pkt := make([]byte, 0, 4+len(data))
@@ -52,11 +62,26 @@ func (c *Client) request(opcode byte, data []byte) {
 	c.conn.Write(pkt)
 }
 
-// readFull читает 32-байтный заголовок пакета ответа и extra-тело reply.
-// Для success/error тело нулевое (пакет ровно 32 байта).
+// readFull читает ОДИН пакет сервера целиком, зная его длину из типа:
+// Error 32, Reply 32+extra, KeymapNotify 24 (без seq!), события 32.
+// Рамки по типу обязательны: KeymapNotify (первое же событие при WM с
+// grabbed-клавиатурой) сдвигает поток на 8 байт, и слепое чтение «по 32»
+// навечно уходит в io.ReadFull.
 func (c *Client) readFull() (rt byte, header []byte, seq uint16, extra []byte, err error) {
+	t := make([]byte, 1)
+	if _, err = io.ReadFull(c.conn, t); err != nil {
+		return 0, nil, 0, nil, err
+	}
+	if t[0] == rtKeymapEv {
+		rest := make([]byte, keymapPacket-1)
+		if _, err = io.ReadFull(c.conn, rest); err != nil {
+			return 0, nil, 0, nil, err
+		}
+		return rtKeymapEv, rest, 0, nil, nil
+	}
 	h := make([]byte, 32)
-	if _, err = io.ReadFull(c.conn, h); err != nil {
+	h[0] = t[0]
+	if _, err = io.ReadFull(c.conn, h[1:]); err != nil {
 		return 0, nil, 0, nil, err
 	}
 	rt = h[0]
@@ -73,10 +98,9 @@ func (c *Client) readFull() (rt byte, header []byte, seq uint16, extra []byte, e
 	return rt, h, seq, extra, nil
 }
 
-// reply — запрос с ответом: пишем, читаем, пока не придёт ответ НАШЕЙ
-// последовательности. Ответы на чужие seq (события, ответы прошлых запросов)
-// молча пропускаются: в помощнике нет асинхронных слушателей, «чужих»
-// пакетов почти нет, а ring-буфер X-сервера их честно досылает.
+// reply — запрос с ответом: пишем и читаем пакеты, пропуская события
+// (KeymapNotify, PropertyNotify, …) и ответы на чужие seq, пока не придёт
+// пакет НАШЕГО типа по НАШЕЙ последовательности.
 func (c *Client) reply(opcode byte, data []byte) (seq uint16, header, extra []byte, err error) {
 	c.request(opcode, data)
 	for {
@@ -84,14 +108,17 @@ func (c *Client) reply(opcode byte, data []byte) (seq uint16, header, extra []by
 		if err != nil {
 			return 0, nil, nil, err
 		}
-		if s != c.seq {
-			continue
-		}
-		if rt == rtError {
+		switch {
+		case rt == rtReply && s == c.seq:
+			return s, h, ex, nil
+		case rt == rtError && s == c.seq:
 			// Окно мертво / свойства нет — для помощника это не сбой:
 			// пустой ответ (nil) = «данных сейчас нет».
 			return s, nil, nil, nil
+		default:
+			// Событие (их seq = номер последнего запроса, совпадает с
+			// c.seq по построению!) или ответ прошлых запросов — пропускаем.
+			continue
 		}
-		return s, h, ex, nil
 	}
 }

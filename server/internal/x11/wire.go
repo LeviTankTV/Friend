@@ -232,17 +232,38 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 		io.ReadFull(c.conn, buf)
 		return fmt.Errorf("X-сервер не принял нас: %s (нужен локальный X-сервер, не Wayland)", buf)
 	case 1: // Success
-		// Setup-заголовок — 8 байт после байта успеха: release(2)+id(2)+
-		// res_len(2)+min_len(2) (res_len — в 4-байтных словах).
-		hdr := make([]byte, 8)
+		// Setup-ответ по спецификации (Xproto, Connection Setup Reply):
+		// после байта успеха — 18 байт заголовка: release(2) rid_base(4)
+		// motion(2) numScreens(2) vendorLen(2) maxReq(2) minKC(1) maxKC(1)
+		// numFormats(1) pad(1). Дальше — resources (всегда 2 записи ×8),
+		// имя вендора (pad4), SCREEN-записи ×32, FORMATS ×8, и для каждого
+		// экрана имя корня: длина(2)+pad4. Прочитать и пропустить НУЖНО ЦЕЛИКОМ:
+		// leftover-байты setup-ответа, попав в readFull следующих запросов,
+		// сдвигают рамки пакетов, и клиент навечно зависает в io.ReadFull
+		// (SYMPTOM на xvfb: focusdbg/focuswatch не печатают ни строки).
+		hdr := make([]byte, 18)
 		if _, err := io.ReadFull(c.conn, hdr); err != nil {
 			return fmt.Errorf("X-рукопожатие: setup-заголовок: %w", err)
 		}
-		resLen := int(binary.LittleEndian.Uint16(hdr[4:6]))
-		if resLen > 0 {
-			skip := make([]byte, resLen*4)
-			if _, err := io.ReadFull(c.conn, skip); err != nil {
-				return fmt.Errorf("X-рукопожатие: setup-данные: %w", err)
+		ridBase := binary.LittleEndian.Uint32(hdr[2:6])
+		c.rootID = ridBase + 0x1ff // id root-окна первого экрана (как в Xlib)
+		numScreens := int(binary.LittleEndian.Uint16(hdr[8:10]))
+		vendorLen := int(binary.LittleEndian.Uint16(hdr[10:12]))
+		numFormats := int(hdr[16])
+		pad4 := func(n int) int { return (n + 3) & ^3 }
+		skip := make([]byte, 16+pad4(vendorLen)+numScreens*32+numFormats*8)
+		if _, err := io.ReadFull(c.conn, skip); err != nil {
+			return fmt.Errorf("X-рукопожатие: setup-данные: %w", err)
+		}
+		nl := make([]byte, 2)
+		for i := 0; i < numScreens; i++ {
+			if _, err := io.ReadFull(c.conn, nl); err != nil {
+				return fmt.Errorf("X-рукопожатие: имя корня: %w", err)
+			}
+			n := int(binary.LittleEndian.Uint16(nl))
+			name := make([]byte, pad4(n))
+			if _, err := io.ReadFull(c.conn, name); err != nil {
+				return fmt.Errorf("X-рукопожатие: имя корня: %w", err)
 			}
 		}
 		return nil

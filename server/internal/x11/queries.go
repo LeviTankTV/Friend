@@ -70,7 +70,7 @@ func (c *Client) ActiveWindow() (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	raw, err := c.propRaw(RootWindow, atom)
+	raw, err := c.propRaw(c.Root(), atom)
 	if err != nil {
 		return 0, err
 	}
@@ -169,13 +169,21 @@ func (c *Client) screensaverOp() byte {
 	data := binary.LittleEndian.AppendUint32(nil, uint32(len(extScreenSaver)))
 	data = append(data, b...)
 	c.request(opQueryExt, data)
-	rt, h, _, _, err := c.readFull()
-	if err != nil || rt == rtError || h == nil {
-		return 0
+	for {
+		rt, h, s, _, err := c.readFull()
+		if err != nil {
+			return 0
+		}
+		if rt == rtError && s == c.seq {
+			return 0 // расширения нет
+		}
+		if rt == rtReply && s == c.seq {
+			// XQueryExtensionReply: enable=b[8], major_opcode=b[9],
+			// first_event=b[10].
+			return h[9]
+		}
+		// Событие (KeymapNotify сразу после коннекта и любые другие) — мимо.
 	}
-	return h[1] // first-event-code место: в QueryExtension ответе
-	// opcode расширения лежит в b[1] (XQueryExtensionReply:
-	// ai, b[1] = major_opcode).
 }
 
 // IdleSeconds — простой в секундах по MIT-SCREEN-SAVER QueryInfo.
@@ -186,10 +194,19 @@ func (c *Client) IdleSeconds() int {
 		return 0
 	}
 	c.request(op, []byte{1, 0, 0, 0}) // внутри расширения op 1 = QueryInfo
-	rt, h, _, _, err := c.readFull()
-	if err != nil || rt == rtError || h == nil {
-		return 0
+	for {
+		rt, h, s, _, err := c.readFull()
+		if err != nil {
+			return 0
+		}
+		if rt == rtError && s == c.seq {
+			return 0
+		}
+		if rt == rtReply && s == c.seq {
+			// XScreenSaverQueryInfoReply: state=b[8], source=b[9],
+			// since (idle, мс) = b[12:16].
+			idle := binary.LittleEndian.Uint32(h[12:16])
+			return int(idle / 1000)
+		}
 	}
-	idle := binary.LittleEndian.Uint32(h[8:12]) // idle_ms
-	return int(idle / 1000)
 }
