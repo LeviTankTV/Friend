@@ -46,7 +46,8 @@ func TestParseDisplay(t *testing.T) {
 func buildXauth(t *testing.T, family uint16, addr, num, name string, data []byte) []byte {
 	t.Helper()
 	s := func(v string) []byte {
-		b := binary.LittleEndian.AppendUint32(nil, uint32(len(v)))
+		// struct xauth: длины строк — u16 (CARD16), как пишет xauth.
+		b := binary.LittleEndian.AppendUint16(nil, uint16(len(v)))
 		return append(b, []byte(v)...)
 	}
 	out := binary.LittleEndian.AppendUint16(nil, family)
@@ -100,9 +101,9 @@ func setupResponse(ridBase uint32) []byte {
 	b := []byte{1} // Success
 	b = binary.LittleEndian.AppendUint16(b, 11)
 	b = binary.LittleEndian.AppendUint32(b, ridBase)
-	b = binary.LittleEndian.AppendUint16(b, 0)   // motion
-	b = binary.LittleEndian.AppendUint16(b, 1)   // numScreens
-	b = binary.LittleEndian.AppendUint16(b, 4)   // vendorLen
+	b = binary.LittleEndian.AppendUint16(b, 0) // motion
+	b = binary.LittleEndian.AppendUint16(b, 1) // numScreens
+	b = binary.LittleEndian.AppendUint16(b, 4) // vendorLen
 	b = binary.LittleEndian.AppendUint16(b, 65535)
 	b = append(b, 8, 255, 0, 0) // minKC, maxKC, numFormats, pad
 	b = append(b, make([]byte, 16)...)
@@ -153,7 +154,7 @@ func TestHandshakeSuccessAndFailure(t *testing.T) {
 		rep := make([]byte, 32)
 		rep[0] = 1
 		binary.LittleEndian.PutUint16(rep[2:4], 1)
-		binary.LittleEndian.PutUint32(rep[4:8], 0)  // extra-слов нет
+		binary.LittleEndian.PutUint32(rep[4:8], 0)   // extra-слов нет
 		binary.LittleEndian.PutUint32(rep[8:12], 42) // atom в собственном поле ответа
 		s2.Write(rep)
 	}()
@@ -221,4 +222,47 @@ func pipe() (net.Conn, net.Conn) {
 		panic(r.e)
 	}
 	return c, r.c
+}
+
+// Формат Xauthority (struct xauth): длины строк — u16 (CARD16). Запись как
+// пишет xauth из xvfb-run: family(256), addr, number, name, data. Ключ к
+// находке CI: чтение длин как u32 не находило cookie, рукопожатие уходило
+// без аутентификации и Xvfb молчал до LoginTimeout.
+func TestParseXauthorityFindsCookie(t *testing.T) {
+	str := func(s string) []byte {
+		b := binary.LittleEndian.AppendUint16(nil, uint16(len(s)))
+		return append(b, s...)
+	}
+	var b []byte
+	// Чужой дисплей — обязан быть пропущен.
+	b = binary.LittleEndian.AppendUint16(b, 256)
+	b = append(b, str("runner")...)
+	b = append(b, str("100")...)
+	b = append(b, str("MIT-MAGIC-COOKIE-1")...)
+	b = append(b, str(string(make([]byte, 16)))...)
+	// Наш дисплей :99, адрес пустой (локальный пир).
+	b = binary.LittleEndian.AppendUint16(b, 256)
+	b = append(b, str("")...)
+	b = append(b, str("99")...)
+	b = append(b, str("MIT-MAGIC-COOKIE-1")...)
+	data := make([]byte, 16)
+	for i := range data {
+		data[i] = 0xAB
+	}
+	b = append(b, str(string(data))...)
+	path := filepath.Join(t.TempDir(), "Xauthority")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseDisplay(":99")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := ParseXauthority(path, d)
+	if err != nil {
+		t.Fatalf("cookie не найден: %v", err)
+	}
+	if len(c.Data) != 16 || c.Data[0] != 0xAB {
+		t.Fatalf("cookie = %x, ждали 16×AB", c.Data)
+	}
 }

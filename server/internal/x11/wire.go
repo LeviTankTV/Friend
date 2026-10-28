@@ -91,8 +91,12 @@ const (
 )
 
 // ParseXauthority читает файл Xauthority и отдаёт cookie для указанного
-// дисплея. Формат: family(u16) addr(строка) number(строка) name(строка)
-// data(строка), длина каждой — u32.
+// дисплея. Формат (struct xauth из Xlib/Xau): family(u16), addr(строка),
+// number(строка), name(строка), data(строка) — длина каждой строки u16
+// (CARD16), НЕ u32. Находка CI-xvfb: чтение длин как u32 не находило
+// cookie, помощник уходил в рукопожатие без аутентификации, а Xvfb на
+// неаутентифицированный запрос молчит до LoginTimeout — отсюда
+// «молчаливый вис» прошлых прогонов.
 func ParseXauthority(path string, display Display) (Cookie, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -100,12 +104,12 @@ func ParseXauthority(path string, display Display) (Cookie, error) {
 	}
 	p := raw
 	rd := func() (string, error) {
-		if len(p) < 4 {
+		if len(p) < 2 {
 			return "", errors.New("Xauthority: обрыв")
 		}
-		n := int(binary.LittleEndian.Uint32(p))
-		p = p[4:]
-		if n < 0 || len(p) < n {
+		n := int(binary.LittleEndian.Uint16(p))
+		p = p[2:]
+		if len(p) < n {
 			return "", errors.New("Xauthority: обрыв")
 		}
 		s := string(p[:n])
@@ -207,8 +211,10 @@ func xauthCookie() Cookie {
 	}
 	c, err := ParseXauthority(path, d)
 	if err != nil {
+		trace("xauth %s: %v", path, err)
 		return Cookie{}
 	}
+	trace("xauth %s: cookie «%s» %d bytes", path, c.Name, len(c.Data))
 	return c
 }
 
