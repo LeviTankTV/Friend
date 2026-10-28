@@ -127,7 +127,7 @@ func readHandshakeRequest(s net.Conn) {
 	}
 	pad := func(n int) int { return (n + 3) & ^3 }
 	nl := int(binary.LittleEndian.Uint16(h[8:10]))
-	skip := make([]byte, pad(nl+2)-2)
+	skip := make([]byte, pad(nl))
 	if _, err := io.ReadFull(s, skip); err != nil {
 		return
 	}
@@ -136,7 +136,7 @@ func readHandshakeRequest(s net.Conn) {
 		return
 	}
 	dl := int(binary.LittleEndian.Uint16(dl2))
-	skip = make([]byte, pad(dl+2)-2)
+	skip = make([]byte, pad(dl))
 	io.ReadFull(s, skip)
 }
 

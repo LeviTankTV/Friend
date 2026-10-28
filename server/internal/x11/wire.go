@@ -320,10 +320,14 @@ func (c *Client) handshake(d Display, ck Cookie) error {
 	// байтовой последовательности, которую объявил флаг byteOrder (у нас
 	// 12 = LSBFirst → little-endian). Big-endian длины сервер читает как
 	// bytes-to-follow=10240 и обрывает соединение (EOF на CI-трейсе).
+	// blocks по Xproto: u16-длина (LSBFirst) + СТРОКА, дополненная нулями
+	// до кратности 4 (padding относится к строке, НЕ к паре «длина+строка»:
+	// блок = 2 + pad4(len); на CI-EOF был от блока на 2 байта короче).
 	blocks := func(s []byte) []byte {
+		pad := (len(s) + 3) & ^3
 		b := binary.LittleEndian.AppendUint16(nil, uint16(len(s)))
 		b = append(b, s...)
-		for len(b)%4 != 0 {
+		for n := len(s); n < pad; n++ {
 			b = append(b, 0)
 		}
 		return b
