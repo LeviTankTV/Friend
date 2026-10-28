@@ -92,10 +92,12 @@ const (
 )
 
 // ParseXauthority читает файл Xauthority и отдаёт cookie для указанного
-// дисплея. Формат (struct xauth из Xlib/Xau): family(u16), addr(строка),
-// number(строка), name(строка), data(строка) — длина каждой строки u16
-// (CARD16), НЕ u32. Находка CI-xvfb: чтение длин как u32 не находило
-// cookie, помощник уходил в рукопожатие без аутентификации, а Xvfb на
+// дисплея. Формат (struct xauth из Xau): family(u16), addr(строка),
+// number(строка), name(строка), data(строка); ВСЕ целые поля — БОЛЬШИМ
+// байтом (big-endian), как пишет xauth. Находка CI-xvfb по hex-зонду
+// (реальные байты: 0100 000d 7275… 0002 3939 0012 MIT-MAGIC-COOKIE-1 0010
+// 16-байтный cookie): чтение длин little-endian не находило cookie,
+// помощник уходил в рукопожатие без аутентификации, а Xvfb на
 // неаутентифицированный запрос молчит до LoginTimeout — отсюда
 // «молчаливый вис» прошлых прогонов.
 func ParseXauthority(path string, display Display) (Cookie, error) {
@@ -108,7 +110,7 @@ func ParseXauthority(path string, display Display) (Cookie, error) {
 		if len(p) < 2 {
 			return "", errors.New("Xauthority: обрыв")
 		}
-		n := int(binary.LittleEndian.Uint16(p))
+		n := int(binary.BigEndian.Uint16(p))
 		p = p[2:]
 		if len(p) < n {
 			return "", errors.New("Xauthority: обрыв")
@@ -122,7 +124,7 @@ func ParseXauthority(path string, display Display) (Cookie, error) {
 		if len(p) < 2 {
 			return Cookie{}, errors.New("Xauthority: обрыв")
 		}
-		fam := int(binary.LittleEndian.Uint16(p))
+		fam := int(binary.BigEndian.Uint16(p))
 		p = p[2:]
 		// Адрес (имя хоста) в записи нас не интересует: локальные семейства
 		// и так годятся, чужие адреса мы не принимаем.
@@ -169,11 +171,14 @@ func xauthScan(raw []byte, display Display) (Cookie, bool) {
 			break
 		}
 		k := off + j // начало строки имени
+		// Ширину префикса проверяем по 4 байтам ПЕРВОЙ: у u16-файла
+		// «00 12» с двумя байтами номера в u32-чтении не равно 18, а у
+		// u32-файла обе проверки верны — u16-выбор сдвинул бы данные на 2.
 		width := 0
-		if k >= 2 && binary.LittleEndian.Uint16(raw[k-2:]) == uint16(len(needle)) {
-			width = 2
-		} else if k >= 4 && binary.LittleEndian.Uint32(raw[k-4:]) == uint32(len(needle)) {
+		if k >= 4 && binary.BigEndian.Uint32(raw[k-4:]) == uint32(len(needle)) {
 			width = 4
+		} else if k >= 2 && binary.BigEndian.Uint16(raw[k-2:]) == uint16(len(needle)) {
+			width = 2
 		}
 		if width == 0 {
 			off = k + 1
@@ -191,9 +196,9 @@ func xauthScan(raw []byte, display Display) (Cookie, bool) {
 			continue
 		}
 		// Префикс длины номера — ПЕРЕД строкой номера.
-		n := int(binary.LittleEndian.Uint16(raw[p-width:]))
+		n := int(binary.BigEndian.Uint16(raw[p-width:]))
 		if width == 4 {
-			n = int(binary.LittleEndian.Uint32(raw[p-width:]))
+			n = int(binary.BigEndian.Uint32(raw[p-width:]))
 		}
 		if n != len(want) {
 			off = k + 1
@@ -203,9 +208,9 @@ func xauthScan(raw []byte, display Display) (Cookie, bool) {
 		dl := k + len(needle)
 		dlen := 0
 		if dl+width <= len(raw) {
-			dlen = int(binary.LittleEndian.Uint16(raw[dl:]))
+			dlen = int(binary.BigEndian.Uint16(raw[dl:]))
 			if width == 4 {
-				dlen = int(binary.LittleEndian.Uint32(raw[dl:]))
+				dlen = int(binary.BigEndian.Uint32(raw[dl:]))
 			}
 		}
 		if dlen <= 0 || dlen > 128 || dl+width+dlen > len(raw) {

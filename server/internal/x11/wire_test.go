@@ -2,6 +2,7 @@ package x11
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"io"
 	"net"
 	"os"
@@ -47,10 +48,10 @@ func buildXauth(t *testing.T, family uint16, addr, num, name string, data []byte
 	t.Helper()
 	s := func(v string) []byte {
 		// struct xauth: длины строк — u16 (CARD16), как пишет xauth.
-		b := binary.LittleEndian.AppendUint16(nil, uint16(len(v)))
+		b := binary.BigEndian.AppendUint16(nil, uint16(len(v)))
 		return append(b, []byte(v)...)
 	}
-	out := binary.LittleEndian.AppendUint16(nil, family)
+	out := binary.BigEndian.AppendUint16(nil, family)
 	out = append(out, s(addr)...)
 	out = append(out, s(num)...)
 	out = append(out, s(name)...)
@@ -230,18 +231,18 @@ func pipe() (net.Conn, net.Conn) {
 // без аутентификации и Xvfb молчал до LoginTimeout.
 func TestParseXauthorityFindsCookie(t *testing.T) {
 	str := func(s string) []byte {
-		b := binary.LittleEndian.AppendUint16(nil, uint16(len(s)))
+		b := binary.BigEndian.AppendUint16(nil, uint16(len(s)))
 		return append(b, s...)
 	}
 	var b []byte
 	// Чужой дисплей — обязан быть пропущен.
-	b = binary.LittleEndian.AppendUint16(b, 256)
+	b = binary.BigEndian.AppendUint16(b, 256)
 	b = append(b, str("runner")...)
 	b = append(b, str("100")...)
 	b = append(b, str("MIT-MAGIC-COOKIE-1")...)
 	b = append(b, str(string(make([]byte, 16)))...)
 	// Наш дисплей :99, адрес пустой (локальный пир).
-	b = binary.LittleEndian.AppendUint16(b, 256)
+	b = binary.BigEndian.AppendUint16(b, 256)
 	b = append(b, str("")...)
 	b = append(b, str("99")...)
 	b = append(b, str("MIT-MAGIC-COOKIE-1")...)
@@ -271,11 +272,11 @@ func TestParseXauthorityFindsCookie(t *testing.T) {
 // даёт «обрыв») — cookie всё равно находится.
 func TestXauthScanU32File(t *testing.T) {
 	str := func(v string) []byte {
-		b := binary.LittleEndian.AppendUint32(nil, uint32(len(v)))
+		b := binary.BigEndian.AppendUint32(nil, uint32(len(v)))
 		return append(b, []byte(v)...)
 	}
 	var b []byte
-	b = binary.LittleEndian.AppendUint16(b, 256)
+	b = binary.BigEndian.AppendUint16(b, 256)
 	b = append(b, str("runner")...)
 	b = append(b, str("99")...)
 	b = append(b, str("MIT-MAGIC-COOKIE-1")...)
@@ -291,5 +292,31 @@ func TestXauthScanU32File(t *testing.T) {
 	}
 	if len(c.Data) != 16 || c.Data[0] != 0xCD {
 		t.Fatalf("cookie = %x", c.Data)
+	}
+}
+
+// Золотой тест из CI-зонда: реальный файл xvfb-run (Ubuntu noble, xauth).
+// Байты сняты hex-дампом в прогоне GitHub Actions (size=59).
+func TestParseXauthorityRealXvfbFile(t *testing.T) {
+	const realHex = "0100000d72756e6e6572766d7461693067000239390012" +
+		"4d49542d4d414749432d434f4f4b49452d3100106feeed648209eb41447e26651dcae97c"
+	raw, err := hex.DecodeString(realHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "Xauthority")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := ParseDisplay(":99")
+	c, err := ParseXauthority(path, d)
+	if err != nil {
+		t.Fatalf("структурный разбор реального файла: %v", err)
+	}
+	if len(c.Data) != 16 || c.Data[0] != 0x6f || c.Data[15] != 0x7c {
+		t.Fatalf("cookie = %x", c.Data)
+	}
+	if c2, ok := xauthScan(raw, d); !ok || string(c2.Data) != string(c.Data) {
+		t.Fatalf("скан по реальному файлу: ok=%v", ok)
 	}
 }
